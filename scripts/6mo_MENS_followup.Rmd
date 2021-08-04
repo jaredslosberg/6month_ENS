@@ -1,0 +1,456 @@
+---
+title: "6mo_MENS_followup.Rmd"
+author: "Jared Slosberg"
+date: "11/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r initialize, echo = F, message = F}
+library(monocle3)
+library(xtable)
+library(scales)
+library(pheatmap)
+library(dplyr)
+library(scran)
+library(ggplot2)
+library(org.Mm.eg.db)
+library(ggpubr)
+library(dplyr)
+library(ComplexHeatmap)
+library(NNLM)
+library(viridis)
+library(htmlwidgets)
+
+source("./accessory_functions/monocle_mods.R")
+source("./accessory_functions/doDifferentialExpression.R")
+source("./accessory_functions/pattern_plotting.R")
+source("./accessory_functions/geneSetEnrichment.R")
+source("./accessory_functions/cluster_genes_mod.R")
+source("./accessory_functions/transferAnnotations.R")
+
+set.seed(138)
+```
+
+```{r}
+#MENS subset
+lmmp <- readRDS("../6month_LMMP.rds")
+getwd()
+#After running the above script and determining which quality cells are in the MEN population, subset on these
+MENS_cell_names <- read.csv("../results/MENS/6mo_mens_names.txt", header = T)
+MENS_cell_names <-as.character(MENS_cell_names$x)
+
+MENS <- lmmp[,MENS_cell_names]
+
+MENS <- estimate_size_factors(MENS)
+MENS <- preprocess_cds(MENS, num_dim = 10, verbose=TRUE)
+MENS <- reduce_dimension(MENS,max_components=2,cores=4,verbose=TRUE)
+plot_cells(MENS)
+plot_cells(MENS, color_cells_by = "sample", label_cell_groups = F)
+
+pData(MENS)$batch<-pData(MENS)$sample
+pData(MENS)$log10UMI <- log10(pData(MENS)$Total_UMIs)
+
+
+MENS <- align_cds(MENS, num_dim = 10, alignment_group = "batch",alignment_k = 20,verbose=T)
+MENS <- reduce_dimension(MENS,max_components=2,cores=4,verbose=TRUE)
+MENS <- cluster_cells(MENS, k=20, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-03)
+plot_cells(MENS)
+plot_cells(MENS, color_cells_by = "sample", label_cell_groups = F)
+
+pData(MENS)$clusters<-clusters(MENS)
+#Assigned cluster is a proxy for cluster where you can manually consolidate / separate clusters of cells
+pData(MENS)$assigned_cluster <- pData(MENS)$clusters
+
+
+
+
+
+```
+
+```{r markers, eval = F}
+marker_test_res <- top_markers(MENS, group_cells_by="cluster", cores=8,verbose=T)
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(25, pseudo_R2) %>% arrange(desc(cell_group))
+
+dt <- DT::datatable(top_specific_markers)
+
+htmlwidgets::saveWidget(dt, file = "../results/MENS_subset_cluster_markers.html")
+
+
+
+
+
+#pData(MENS)$cell_type[clusters(MENS) == 1] <- "Unknown"
+```
+
+
+```{r cellcycle, eval  =F}
+
+cc_features <- c("cycle_phase","cycle_G1_score","cycle_S_score","cycle_G2M_score")
+
+for(feat in cc_features){
+  MENS <- transferAnnotations(to_annotate_cds = MENS, annotated_cds = lmmp, by_cluster = F, annotation_name = "feat")
+
+}  
+  # mm.pairs <- readRDS(system.file("exdata", "mouse_cycle_markers.rds", package="scran"))
+# 
+# exprs.mat <- exprs(MENS)
+# rownames(exprs.mat) <- fData(MENS)$gene_id_trimmed
+# cyc_results <- cyclone(exprs.mat, pairs = mm.pairs, verbose = T)
+# 
+# pData(MENS)$cycle_phase <- cyc_results[['phases']]
+# 
+# pData(MENS)$cycle_G1_score <- cyc_results[['normalized.scores']]$G1
+# pData(MENS)$cycle_S_score <- cyc_results[['normalized.scores']]$S
+# pData(MENS)$cycle_G2M_score <- cyc_results[['normalized.scores']]$G2M
+
+
+```
+
+```{r}
+#pdf("/home/jared/ENS/Timecourse_ENS/plots/MENS.pdf")
+
+plot_cells(MENS, group_label_size = 3)
+plot_cells(MENS, color_cells_by = "log10UMI")
+plot_cells(MENS, color_cells_by = "cycle_phase", cell_size = 0.6, label_cell_groups = F)
+
+plot_cells_mod(MENS, color_cells_by="sample", group_cells_by="cluster", label_cell_groups = F) +
+  ggtitle("Sample") + facet_wrap(vars(sample))
+
+
+p<-ggplot(as.data.frame(pData(MENS))) +
+  geom_bar(aes(x=clusters,fill=sample),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("sample representation by cluster")
+p1<-ggplot(as.data.frame(pData(MENS))) +
+  geom_bar(aes(x=clusters,fill=batch),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("batch representation by cluster")
+
+p
+p1
+```
+
+
+```{r, pseudotime, eval = F}
+MENS <- learn_graph(MENS, verbose = TRUE)
+MENS <- order_cells(MENS)
+
+genes_of_interest <- c("Apoh","Msln")
+indices <- as.integer(NULL)
+for(gene in genes_of_interest){
+ ind <- which(fData(MENS)$gene_short_name == gene)
+ indices <- c(indices,ind)
+}
+plot_genes_in_pseudotime(MENS[indices,])
+  
+
+
+
+
+my_colors<- scales::hue_pal()(6)
+p <- plot_cells(cds, color_cells_by = "age", label_cell_groups = F)
+g <- plot_cells(cds[, pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = F)
+p1 <- plot_cells(cds[,pData(cds)$sample=="p10" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = F) + scale_color_manual(values = my_colors[1])
+p2 <- plot_cells(cds[,pData(cds)$sample=="p11" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[2])
+p3 <- plot_cells(cds[,pData(cds)$sample=="p20" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[3])
+p4 <- plot_cells(cds[,pData(cds)$sample=="p21" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[4])
+p5 <- plot_cells(cds[,pData(cds)$sample=="p60" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[5])
+p6 <- plot_cells(cds[,pData(cds)$sample=="p61" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[6])
+
+
+
+
+#MENS <- learn_graph(MENS, learn_graph_control = list("minimal_branch_len" = 2))
+#MENS <- order_cells(MENS) #shiny app pop up
+
+
+
+#MENS_sub <- MENS[,clusters(MENS)==2]
+#MENS_sub <- learn_graph(MENS_sub,learn_graph_control = list("minimal_branch_len" = 2))
+
+#plot_cells(MENS_sub, color_cells_by = "pseudotime")
+
+goi <- c("Msln","Cftr","Fmo2")
+plot_genes_in_pseudotime(MENS[fData(MENS)$gene_short_name %in% goi,], color_cells_by = "pseudotime", min_expr = 0.5)
+
+MENS <- detect_genes(MENS)
+res <- graph_test(MENS, neighbor_graph = "principal_graph")
+
+res <- res %>% arrange(q_value)
+res <- res[res$num_cells_expressed > 20,]
+top_ids <- res$gene_short_name[1:20]
+
+
+#p <- plot_genes_in_pseudotime(MENS[fData(MENS)$gene_short_name %in% top_ids[1:20],], color_cells_by = "pseudotime", min_expr = 0.5, panel_order = top_ids[1:20])
+#ggsave("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/MENS_followup/trajectory_genes_pseudotime.pdf", height = 40)
+
+
+```
+
+```{r diff exp, eval = T}
+
+lrt <- doDifferentialExpression(cds_obj = MENS, method = "LRT",min_pct_cells_exprs =  .02, 
+                                full = "~num_genes_expressed + mito_ratio + clusters",
+                                reduced = "~num_genes_expressed + mito_ratio")
+
+write.csv(lrt, file = "../results/MENS/de_genes_by_cluster.csv")
+lrt_filt <- lrt %>% filter(q_value < 0.05)
+print(qplot(lrt_filt$num_cells_expressed))
+#ensembl ids character vector
+de_genes <- pull(lrt_filt, gene_id)
+
+# graph_test_res <- graph_test(MENS, neighbor_graph = "knn", k = 15, verbose = T)
+# pData(cds)$test_group <- NULL
+# pData(cds)$test_group[pData(cds)$assigned_cluster == 3] <- 3
+# pData(cds)$test_group[pData(cds)$assigned_cluster == 2] <- 2
+# plot_cells(cds, color_cells_by = "test_group")
+
+
+```
+##There are 'r length(de_genes)' differentially expressed genes by MENs subcluster (p < 0.05)
+```{r defineSubclusters, eval =F}
+#For genes that are differentially expressed, what are there specificities to each cluster
+MENS_sub <- MENS[de_genes,]
+marker_test_res <- as.data.frame(top_markers(MENS_sub, group_cells_by="clusters", cores=8,verbose=T))
+
+DT::datatable(marker_test_res %>% dplyr::select(-c(gene_id, marker_score,pseudo_R2)), options = list(pageLength = 15))
+
+#Cluster 6 defined by proliferative markers
+#Clusters 3 and 6 have an order of magnitude more UMI per cell
+
+
+##what is actually driving these clusters to be different? Because they seem very similar.
+##Try removing mt and ribosomal proteins
+ribo.ind <- stringr::str_detect(fData(MENS)$gene_short_name,"^Rps") |
+  stringr::str_detect(fData(MENS)$gene_short_name,"^Rpl")
+
+ribo.ind <- stringr::str_detect(fData(MENS)$gene_short_name,"^mt-") 
+
+#Select genes with expression in greater than 10 cells
+ribo.ind.filt <- which(fData(MENS)$num_cells_expressed[ribo.ind] > 10)
+MENS_sub <- MENS[ribo.ind.filt,]
+
+ribo_tx_counts <- data.frame("cluster" = NA,"norm" = NA ,"tx_count" = NA)
+for(cl in sort(unique(pData(MENS_sub)$clusters))){
+  raw <- sum(exprs(MENS_sub[,pData(MENS_sub)$clusters == cl]))
+  raw_avg <- raw/sum(pData(MENS_sub)$clusters == cl)
+
+  #use the size normalization factor computed for all genes, do not recompute here
+  size_norm <- sum(normalized_counts(MENS_sub[,pData(MENS_sub)$clusters == cl], norm_method = "size_only"))
+  size_norm_avg <- size_norm/sum(pData(MENS_sub)$clusters == cl)
+
+  df <- data.frame(cluster = cl, norm = c("raw","size_normed"), tx_count = c(raw_avg, size_norm_avg))
+  ribo_tx_counts <- rbind(ribo_tx_counts, df)
+}
+ribo_tx_counts <- ribo_tx_counts[-c(1),]
+ggplot(ribo_tx_counts, aes(cluster, tx_count)) + geom_col(aes(fill = norm), position = "dodge") + 
+  ggtitle("Average ribosomal transcripts per cell")
+
+
+MENS_sub <- estimate_size_factors(MENS_sub)
+MENS_sub <- preprocess_cds(MENS_sub, num_dim = 5, verbose=TRUE)
+MENS_sub <- reduce_dimension(MENS_sub,max_components=2,cores=4,verbose=TRUE)
+MENS_sub <- align_cds(MENS_sub, num_dim = 5, alignment_group = "batch",alignment_k = 20,verbose=T)
+MENS_sub <- reduce_dimension(MENS_sub,max_components=2,cores=4,verbose=TRUE)
+MENS_sub <- cluster_cells(MENS_sub, k=20, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-04)
+plot_cells(MENS_sub)
+
+```
+
+
+
+```{r, eval = F}
+#Grab genes that are annotated to the cell cycle via GO
+cycle.anno <- AnnotationDbi::select(org.Mm.eg.db, keytype='GOALL', keys='GO:0007049',columns='ENSEMBL')[,'ENSEMBL']
+
+cycle.genes <- rownames(MENS)[fData(cds)$gene_id_trimmed %in% cycle.anno]
+                     
+MENS <- preprocess_cds(MENS, num_dim = 5, use_genes = cycle.genes, verbose=TRUE)
+MENS <- reduce_dimension(MENS,max_components=2,cores=4,verbose=TRUE, preprocess_method = "PCA")
+
+plot_cells(MENS, color_cells_by = "assigned_cluster")
+plot_cells(MENS, color_cells_by = "cycle_G2M_score")
+```
+
+
+```{r patternAnalysis, message=F}
+set.seed(155)
+date = "11-25"
+
+MENS <- estimate_size_factors(MENS)
+print(dim(MENS))
+
+#use either (size -> log) normalized counts
+#normed_exprs <- normalized_counts(MENS, norm_method = "log")
+#or use just log normalized
+normed_exprs <- normalized_counts(MENS, norm_method = "log") #and size normalized
+
+#Choose dimensionality of NMF, how many patterns will be identified
+npattern <- 40
+system.time(decomp <- nnmf(A=as.matrix(normed_exprs),k = npattern,verbose = F, show.warning = T))
+rownames(decomp$H) = paste0("cellPattern",c(1:npattern)) 
+
+#Change this to something like cluster, cell type... whatever cell metadata to group by
+group_feature <- "clusters"
+
+#Subset to cell name and feature, group of feature to establish column rows
+cells_by_group <- as.integer(pData(MENS)[,group_feature])
+names(cells_by_group) <- colnames(MENS)
+#order cells by their cluster, this object is a named integer array
+cells_by_group <- cells_by_group[order(cells_by_group)]
+cells_order <- names(cells_by_group)
+
+
+#Plot heatmap of H (cell weight) matrix
+#Assign a color for each group, these match default ggplot colors
+my_colors <- scales::hue_pal()(length(levels(pData(MENS)[,group_feature])))
+names(my_colors) <- unique(cells_by_group)
+ha_cellgroup <- HeatmapAnnotation(cluster = cells_by_group,
+                                  col = list(cluster = my_colors))
+
+#We want cells grouped by cluster, as above. We also want to do hierarchical clustering
+#on the pre-defined cluster level. Info must be in the same order 
+cell_mat <- decomp$H[,cells_order]
+stopifnot(colnames(cell_mat) == cells_order)
+
+
+pdf(paste0("../plots/NMF/MENS/MENS_",date,"_k_40_log_cellsize_cellweights.pdf"), width = 10)
+plot_cells(MENS, color_cells_by = group_feature, group_label_size = 3)
+
+ComplexHeatmap::Heatmap(cell_mat, name = "cellscore",
+                        top_annotation = ha_cellgroup,
+                        column_order = cells_order,
+                        #cluster_columns = cluster_within_group(cell_mat, groups_to_cluster),
+                        show_column_names = F)
+                        #row_order = rownames(decomp$H))
+dev.off()
+
+##Gene weights associated with patterns
+geneWeights.df <- as.data.frame(decomp$W)
+colnames(geneWeights.df)<-paste0("cellPattern",c(1:npattern))
+#Merge cell weights with pData for plotting pattern scores on UMAP embedding
+cellWeights.df <- base::as.data.frame(t(decomp$H))
+colnames(cellWeights.df) = paste0("cellPattern",c(1:npattern))
+
+
+#This adds pattern cell weights to pData, make sure they align
+#left_join() would be more specific than this cbind()
+add.to.cds <- 1
+if(add.to.cds){
+  stopifnot(rownames(pData(MENS)) == rownames(cellWeights.df))
+  pData(MENS) <- cbind(pData(MENS),cellWeights.df)
+}
+
+
+#Color UMAP embedding by cell weights for each pattern.
+#Call function and return a list of ggplot objects, and plot to one page
+weighted_emb <- lapply(1:npattern,
+                       FUN = plotCellPatterns,
+                       cds_obj = MENS,
+                       red_method <- "UMAP",
+                       do.clip <- c(0.02,.98))
+png(paste0("../plots/NMF/MENS/MENS_",date,"_NMF_Patterns.png"), height= 2000, width = 2000)
+print(do.call(ggarrange, weighted_emb[1:npattern]))
+dev.off()
+
+
+#Look at pattern usage over cell age
+plot_over_time <- 0
+if(plot_over_time){
+  condition_patterns<- as.list(1:npattern)
+  myplots <- lapply(paste0("cellPattern",condition_patterns), 
+                    FUN= plotPatternUsageByCondition,
+                    cds = MENS,
+                    bin_by = "age")
+  pdf(paste0("../plots/NMF/MENS/MENS_",date,"_patterns_over_age.pdf"), height= 20, width = 20)
+  print(do.call(ggarrange, myplots[1:length(condition_patterns)]))
+  dev.off()
+}
+
+
+# tmp<-as.data.frame(merge(fData(MENS)[,c("gene_id","gene_short_name")],geneWeights.df,by=0))
+# dt<- DT::datatable(tmp[,c("gene_id","gene_short_name",
+#                      unlist(lapply(1:npattern,function(i){paste0("cellPattern",i)}))
+# )])
+
+#saveWidget(dt, file = "./results/NMF/MENS/MENS_10-31_pattern_gene_weights.html")
+
+write.csv(cellWeights.df, paste0("../results/NMF/MENS/MENS_",date,"_log_cellsize_pattern_cell_weights.csv"))
+
+write.csv(geneWeights.df, paste0("../results/NMF/MENS/MENS_",date,"_log_cellsize_pattern_gene_weights.csv"))
+
+```
+
+```{r PatternCorr}
+
+#### Check correlation of patterns with cell features
+#### One hot encoding method.
+### For each pattern, compute correlation between two vectors. One is continuous (cell pattern weight)
+### and one is binary (yes/no is that cell in that group)
+pData(MENS)$cycle_phase[is.na(pData(MENS)$cycle_phase)] <- "NA"
+
+#categorical features, one-hot encoding
+features <- c("clusters","cycle_phase")
+heatmap_figure_list <- lapply(features, function(feature){
+  feature_levels <- sort(unique(pData(MENS)[,feature]))
+  
+  corr_mat <- matrix(nrow = length(feature_levels), ncol = npattern)
+  
+  
+  #loop over each pattern
+  for(i in 1:npattern){
+    cell_weights <- cellWeights.df[,paste0("cellPattern",i)]
+    names(cell_weights) <- rownames(cellWeights.df)
+    #re-initialize empty correlation vector
+    corr_vec <- numeric()
+    #loop over each level within the categorical variable
+    for(level in feature_levels){
+  
+      values <- pData(MENS)[,feature]
+      one_hot_values <- (values == level)
+      names(one_hot_values) <- colnames(MENS)
+      #Make sure our cells are in the same order
+      assertthat::assert_that(sum(names(one_hot_values) == names(cell_weights)) == length(one_hot_values))
+      
+      #calculate correlation between two vectors
+      level_cor <- cor(cell_weights, one_hot_values)
+      #corr_df is a one-dimensional vector, eg the correlations between all features for a single pattern
+      corr_vec <- c(corr_vec, level_cor)
+    }
+    #Now we have a n_feature_levels x n_pattern matrix with pairwise correlations
+    corr_mat[,i] <- corr_vec
+  }
+  rownames(corr_mat) <- feature_levels
+  colnames(corr_mat) <- paste0("cellPattern",1:npattern)
+  
+  heatmap_figure <- ComplexHeatmap::Heatmap(corr_mat, name = "pearson_corr", 
+                                            column_title = paste0("correlation between pattern and ",feature, " annotation"))
+  return(heatmap_figure)
+})
+
+
+pdf(paste0("../plots/NMF/MENS/MENS_",date,"_pattern_11-25_categorical_feature_correlation.pdf"), height= 8, width = 8)
+print(heatmap_figure_list)
+dev.off()
+
+
+
+
+```
+
+```{r GSEA, eval = F, message=F, warning= F}
+
+geneWeights.df <- geneWeights.df %>% tibble::rownames_to_column(var = "gene_id")
+geneSetEnrichment(gene_weights = geneWeights.df, n_genes = 1500, n_patterns = 40,
+                  file_prefix = paste0("../results/GSEA/mens/MENS_",date,"_pattern_gene_weights"))
+
+```
+
+```{r}
+saveRDS(MENS, file = "../6mo_MENS_11-25.rds")
+sessionInfo()
+```

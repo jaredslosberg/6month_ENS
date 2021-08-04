@@ -1,0 +1,187 @@
+---
+title: "Gut atlas MENS projection"
+output: html_notebook
+---
+
+
+
+```{r load, message = F, results= 'hide'}
+library(projectR)
+library(ggplot2)
+library(dplyr)
+library(monocle3)
+library(here)
+library(furrr)
+source(here("scripts/accessory_functions/monocle_mods.R"))
+source(here("scripts/accessory_functions/pattern_plotting.R"))
+source(here("scripts/accessory_functions/patternFeatureCorrelationHeatmap.R"))
+source(here("scripts/accessory_functions/convertHomologs.R"))
+
+
+```
+
+
+```{r init}
+
+# none, cell_size_log, log
+norm_method <- "cell_size_log"
+
+#declare patterns of interest
+MENS_patterns <- c(50,26,25,21,29)
+NENS_patterns <- c(43)
+glial_patterns <- c(22,15,32,2)
+select_patterns <- c(MENS_patterns, NENS_patterns, glial_patterns)
+
+
+print(norm_method)
+
+print(select_patterns)
+
+###Load in projections ----
+#teichman_gut_atlas_filename <- 
+teichman_mesenchymal_atlas_filename <- "/data/users/jared/atlas_processing/gut_cell_atlas/data/mesenchymal_gut.Rds"
+
+cds <- readRDS(teichman_mesenchymal_atlas_filename)
+
+#Previously learned gene weights from NMF on logscaled expression counts
+lmmp_6mo_patttern_geneweights_filename <- here("results/NMF/lmmp/lmmp_6mo_11-1_pattern_gene_weights.csv")
+learned_weights <- read.csv(
+  file = lmmp_6mo_patttern_geneweights_filename,
+  row.names = 1)
+
+npattern <- dim(learned_weights)[2]
+
+```
+
+Gut atlas is human, patterns are defined in mouse, so convert genes to human
+```{r}
+
+
+homologs <- readRDS(here("teichman_gut_atlas/data/homologs.rds"))
+# no_match <- tfs[!(tfs %in% homologs$Gene.name.human)]
+
+#1 to 1 matches, NA if not present in dataset
+matched_homologs <- convertHomologs(rownames(learned_weights), rownames(cds), homolog.table = homologs)
+colnames(matched_homologs) <- c("gene_id_trimmed","human_gene_id") 
+
+matched_homologs_filt <- matched_homologs[!is.na(matched_homologs$human_gene_id),]
+
+learned_weights_filt <- learned_weights[matched_homologs_filt$gene_id_trimmed,]
+rownames(learned_weights_filt) <- matched_homologs_filt$human_gene_id
+
+#Now both are human genes, take intersection
+genes_to_use <- intersect(rownames(learned_weights_filt), rownames(cds))
+
+cds_filt <- cds[genes_to_use,]
+learned_weights_filt <- learned_weights_filt[genes_to_use,]
+```
+
+
+
+```{r} 
+load.existing.projection.values <- 0
+if(load.existing.projection.values){
+  #first column is cell barcodes, rest of columns are patterns
+  #transferred_cell_wts <- read.csv(paste0("./data/projections/",condition,"_ENS_",norm_method,"_in_TC_LMMP_9-18_patterns.csv"), row.names = 1)
+}else{
+  set.seed(131)
+  #TODO: update to switch statement
+  if(norm_method == "none"){ exprs_mat <- as.matrix(exprs(cds))}
+  if(norm_method == "log"){ exprs_mat <- as.matrix(log10(exprs(cds)+1))}
+  if(norm_method == "cell_size_log"){ 
+    exprs_mat <- normalized_counts(cds_filt) 
+    
+  }   
+  
+  #sparse matrix too large to convert to dense, so break into chunks
+  n_by <- 40000
+  n <- dim(cds_filt)[2]
+ 
+  breaks <- seq(from = 0, to = n, by= n_by)
+  if(breaks[length(breaks)] != n){
+    breaks <- c(breaks, dim(cds_filt)[2])
+  }
+  breaks
+  
+  exprs_list <- list()
+  for(i in c(1:(length(breaks)-1))){
+    #subset
+    exprs_mat_sub <- exprs_mat[, seq(breaks[i]+1, breaks[i+1], by = 1)]
+    exprs_list <- c(exprs_list, exprs_mat_sub)
+  }
+  names(exprs_list) <- paste0("sub", 1:(length(breaks)-1))
+  
+  #projection
+  transferred_cell_weights_list <- furrr::future_map(exprs_list, function(mat){
+    transferred_cell_wts_sub <- t(projectR::projectR(data = as.matrix(mat),
+                                                 loadings = as.matrix(learned_weights_filt)))
+    
+    colnames(transferred_cell_wts_sub) = paste0("cellPattern",1:npattern)
+    
+    return(transferred_cell_wts_sub)
+    
+  })
+  
+  transferred_cell_weights <- do.call(rbind, transferred_cell_weights_list)
+  
+  write.csv(transferred_cell_weights,paste0(here("teichman_gut_atlas/data/gut_atlas_in_6mo_LMMP_11-1_patterns.csv")),
+            quote = F, row.names = T)
+}
+
+```
+
+```{r}
+
+#Bind pattern weights to object, make sure cells are exactly the same. Could left_merge but pData not being a true data.frame is an issue
+assertthat::assert_that(all(rownames(pData(cds)) == rownames(transferred_cell_weights)),
+                        msg = "Cells in projection weights matrix are not the same as cells in cds object")
+pData(cds) <- cbind(pData(cds), transferred_cell_weights)
+pData(cds)[,"log10UMI"] <- log10(pData(cds)[,"total_counts"] +1)
+
+pattern_wt_plots <- lapply(select_patterns, plotCellPatterns, cds_obj = cds, do.clip = c(0.01,0.99))
+pattern_wt_plots
+```
+
+```{r, eval = F}
+#calculate UMAP based on projected pattern weights instead of PCA
+do.reembed <- 1
+if (do.reembed){
+  features_of_interest <- transferred_cell_wts[,paste0("cellPattern",select_patterns)]
+  umap_res <- uwot::umap(as.matrix(features_of_interest),
+                         metric="cosine",
+                         min_dist = 0.1,
+                         nn_method = "annoy")
+  
+  reducedDims(cds)$NMF_UMAP <- umap_res
+  
+  plot_cells_mod(cds, reduction_method = "NMF_UMAP", color_cells_by = "clusters", label_cell_groups = F) + 
+    ggtitle(paste0("UMAP embedding based on projections of select ENS patterns: ", 
+                   paste(select_patterns, collapse = ",")))
+  
+  p_wt_plots <-lapply(select_patterns, plotCellPatterns, cds, red_method = "NMF_UMAP", do.clip = c(0.01,0.99))
+  
+}      
+
+```
+
+```{r}
+plot_genes_by_group(cds, markers = toupper(c("Msln","Cdh3","Fmo2","Slpi","C3","Wt1","Upk3b","Slc17a9"))) + coord_flip() + theme(axis.text.y = element_text(size = 6))
+
+
+pattern_usage_plots <- lapply(paste0("cellPattern",select_patterns), plotPatternUsageByCondition, cds, bin_by = "Age") 
+pattern_usage_plots <- lapply(pattern_usage_plots, function(x){
+  x + theme(axis.text.x = element_text(angle = 90))
+})
+pattern_usage_plots[[1]] + theme(axis.text.x = element_text(angle = 90))
+```
+```{r}
+pData(cds)$Age <- factor(pData(cds)$Age, levels = c("6.1Wk", "6.7Wk", "6.9Wk", "7.4Wk" ,"7.9Wk", "8.4Wk", "9.2Wk" ,"9.9Wk" ,"10.2Wk", "10Wk","11.1Wk","12Wk","15Wk", "16Wk", "17Wk", "4","6","9","10","11","12","13","14", "20-25", "25-30", "45-50", "60-65", "65-70", "70-75"))
+
+pattern_usage_plots <- lapply(paste0("cellPattern",select_patterns), FUN = function(x){
+  
+  plotPatternUsageByCondition(x, cds, bin_by = "Age") + theme(axis.text.x = element_text(angle = 90))
+
+})
+pattern_usage_plots
+```
+
