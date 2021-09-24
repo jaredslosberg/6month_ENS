@@ -17,10 +17,19 @@ Scripts to generate figs and supp figs in .scripts/figures
 
 Scripts run in the following order: 
 MES_6mo_LMMP_analysis.Rmd
-  pattern_analysis.R
-  6mo_MENS_followup.html
+  tricycle_analysis.Rmd
+    pattern_analysis.R
+  6mo_MENS_followup.Rmd
   
   
 ## Analysis of relevant public datasets
 tabula_muris/ teichman_gut_atlas/ vanderbilt/
 Preprocessing of each datasets elsewhere, e.g. /data/users/jared/atlas_processing
+
+
+## RNA Velocity analysis
+Spliced and unspliced counts generated using kallisto during preprocessing
+After generation and annotation of cds object, calculate RNA velocity
+
+velocity/scripts/make_h5ad.R #converts cds object to h5ad and adds unspliced counts
+  velocity/velocity.ipynb

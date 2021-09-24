@@ -1,0 +1,97 @@
+---
+title: "Cell cycle classification"
+author: Jared Slosberg
+output: html_notebook
+---
+
+```{r check_interactive}
+
+if(interactive()){
+  print(date())
+  print("This was run interactively. Please run with rmarkdown::render")
+}else{
+  print(paste0("This notebook was compiled on ", date()))
+}
+```
+
+
+```{r}
+library(monocle3)
+library(tricycle)
+library(SingleCellExperiment)
+library(scater)
+library(cowplot)
+library(ggplot2)
+library(here)
+library(dplyr)
+source(here("scripts/accessory_functions/monocle_mods.R"))
+```
+
+
+```{r}
+cds <- readRDS(here("6month_LMMP.rds"))
+```
+
+```{r}
+rownames(cds) <- fData(cds)[,"gene_id_trimmed"]
+
+assay(cds, "logcounts") <- normalized_counts(cds)
+
+cds <- tricycle::project_cycle_space(cds, exprs_values = "logcounts")
+  
+#plot pca
+p1 <- plot_cells_mod(cds, reduction_method = "tricycleEmbedding") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(cds))) + 
+  theme_bw(base_size = 14)
+
+cds <- estimate_cycle_position(cds)
+
+#plot pca
+p2 <- plot_cells_mod(cds, reduction_method = "tricycleEmbedding", color_cells_by = "tricyclePosition") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(cds))) + 
+  theme_bw(base_size = 14)
+
+```
+
+```{r}
+#schwabe
+cds <- estimate_cycle_stage(cds, gname.type = 'ENSEMBL', species = 'mouse', exprs_values = "logcounts")
+
+plot_cells_mod(cds, reduction_method = "tricycleEmbedding", color_cells_by = "CCStage") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(cds))) +
+  theme_bw(base_size = 14)
+
+##cylic scale
+p <- plot_emb_circle_scale(cds, dimred = 1, point.size = 3.5, point.alpha = 0.9) +
+  theme_bw(base_size = 14)
+legend <- circle_scale_legend(text.size = 5, alpha = 0.9)
+p3 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.4))
+
+pca_emb_pos <- reducedDim(cds, "tricycleEmbedding")
+tric_pos <- as.data.frame(colData(cds))[,"tricyclePosition"]
+
+#Add back to cds object
+reducedDim(cds, "tricycleEmbedding") <- pca_emb_pos
+pData(cds)[,"tricyclePosition"] <- tric_pos
+
+p<-plot_emb_circle_scale(cds, dimred = "UMAP", color_by = "tricyclePosition")
+p4 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.1))
+```
+
+```{r}
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+```
+
+```{r}
+sessionInfo()
+```
+

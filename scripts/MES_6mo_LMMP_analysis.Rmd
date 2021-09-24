@@ -21,10 +21,18 @@ library(biomaRt)
 library(xtable)
 library(scales)
 library(scran)
+library(here)
+library(purrr)
 
 source("./accessory_functions/doDifferentialExpression.R")
 source("./accessory_functions/assignCC.R")
 
+directs <- c("data","plots","results")
+map(directs, function(dir){
+  if(!dir.exists(dir)){
+    dir.create(here(dir))
+  }
+})
 
 ```
 
@@ -43,7 +51,7 @@ samples<-c("TH","TL")
 
 
 cds_list<-list()
-spliced_kallisto_path <- "/home/jared/ENS/6mo_LMMP/preprocessing/bus_output/"
+spliced_kallisto_path <- here("preprocessing/bus_output/")
 # Read genes.mtx
 for (i in 1:length(samples)){
     print(samples[i])
@@ -146,7 +154,6 @@ fData(cds)$num_reads <- Matrix::rowSums(exprs(cds))
 
 pData(cds)$log10UMI <- log10(pData(cds)$Total_UMIs)
 
-assay(cds, "norm_counts") <- normalized_counts(cds, norm_method = "log")
 ```
 
 ## Get and add gene symbols from biomart
@@ -220,56 +227,73 @@ cds <- preprocess_cds(cds, num_dim = 50, verbose=TRUE)
 
 
 plot_pc_variance_explained(cds)
+
+assay(cds, "logcounts") <- normalized_counts(cds, norm_method = "log")
+
 ```
 
 # Dimensionality Reduction
 ```{r}
-cds <- reduce_dimension(cds,max_components=2,cores=6,verbose=TRUE)
-#cds <- order_cells(cds)
-#pdf(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/cells_by_sample.pdf", width = 6,height = 6)
+do.existing.embedding <- T
+if(do.existing.embedding){
+  pdat <- read.csv(here("results/lmmp_umap_clusters_og.csv"), row.names = 1)
+  
+  assertthat::assert_that(all(rownames(pdat) == colnames(cds)))
+  
+  reducedDim(cds,"UMAP") <- pdat[, c("UMAP_1","UMAP_2")]
+
+  pData(cds)$clusters <- pdat[,"clusters"] %>% as.factor()
+} else{
+
+  cds <- reduce_dimension(cds,max_components=2,cores=6,verbose=TRUE)
+
+}
+
+
 plot_cells(cds)
 plot_cells(cds,color_cells_by="sample",cell_size=0.5,label_cell_groups = F)
 
 plot_cells(cds,genes=c("Sox10","Ret","Uchl1","Snap25"),cell_size=0.8)
-#dev.off()
 
-#pdf("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/pilot_gene_survey.pdf",width=20,height=20)
 #plot_cells(cds, genes=c("Met", "Cdh3", "Clic3", "Cftr", "Myh6", "Calcb"),cell_size=0.5)
 #plot_cells(cds, genes=c("Ret", "Sox10", "Nos1", "Snap25", "Gfra1", "Gfra2"),cell_size=0.5)
 #plot_cells(cds, genes=c("Slpi", "Wt1", "Msln", "Uchl1", "Chat", "Gpr88", "Best1", "Krt19", "Gfap", "Nes"),cell_size=0.5)
-#dev.off()
+
 ```
 
 
 # Remove batch effect
 ```{r}
-cds <- align_cds(cds, num_dim = 50, alignment_group = "sample",alignment_k = 20,verbose=T)
-cds <- reduce_dimension(cds,max_components=2,cores=4,verbose=TRUE)
-#cds <- order_cells(cds)
-#pdf(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/cells_by_sample_batch_corrected.pdf", width =6, height = 6)
-plot_cells(cds,color_cells_by="sample",cell_size=0.5, label_cell_groups = F, alpha = .5)
-plot_cells(cds, genes = c("Ret","Sox10"), alpha = 0.5)
-dev.off()
+#do not run if using existing embedding, which is loaded in block above
+if(!do.existing.embedding){
+  set.seed(502)
+  
+  cds <- align_cds(cds, num_dim = 50, alignment_group = "sample",alignment_k = 20,verbose=T)
+  cds <- reduce_dimension(cds,max_components=2,cores=4,verbose=TRUE)
+  #cds <- order_cells(cds)
+  
+  plot_cells(cds,color_cells_by="sample",cell_size=0.5, label_cell_groups = F, alpha = .5)
+  plot_cells(cds, genes = c("Ret","Sox10"), alpha = 0.5)
 
+}
 ```
 
 # Clustering 
 ```{r}
-cds <- cluster_cells(cds, k=15, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=6e-05)
 
-plot_cells(cds)
-#pdf("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots//Rerun/50PCs/Partition_umap.pdf",width=6,height=6)
-plot_cells(cds, color_cells_by="partition", group_cells_by="partition") + ggtitle("Partition(Cluster)")
-plot_cells(cds, color_cells_by="sample", group_cells_by="partition") + ggtitle("Sample")
+if(!do.existing.embedding){
+  cds <- cluster_cells(cds, k=15, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-05)
+  pData(cds)$clusters<-clusters(cds)
+  
+} 
 
-#dev.off()
+plot_cells(cds, color_cells_by = "clusters")
+plot_cells(cds, color_cells_by="sample") + ggtitle("Sample")
 
-# Partitions by age
-pData(cds)$partition<-partitions(cds)
-pData(cds)$cluster<-clusters(cds)
+
 
 p<-ggplot(as.data.frame(pData(cds))) +
-  geom_bar(aes(x=cluster,fill=sample),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("sample representation by cluster")
+  geom_bar(aes(x=clusters,fill=sample),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("sample representation by cluster")
 
 #pdf("~/Goff_Lab/Kulkarni_ENS/6month_LMMP/plots/Cluster_by_sample.pdf",width=9,height=6)
 plot_cells(cds) 
@@ -282,7 +306,7 @@ plot_cells(cds, color_cells_by = "log10UMI")
 
 # Marker Gene testing
 ```{r, message= F, results= 'hide', warning=F}
-marker_test_res <- top_markers(cds, group_cells_by="cluster", cores=1,verbose=F, genes_to_test_per_group = 30)
+marker_test_res <- top_markers(cds, group_cells_by="clusters", cores=1,verbose=F, genes_to_test_per_group = 30)
 
 #saveRDS(object = cds, file = "~/Goff_Lab/Kulkarni_ENS/Analysis/ENS_merged_samples.rds")
 #cds<-readRDS(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/ENS_merged_samples.rds")
@@ -304,7 +328,7 @@ top_specific_marker_ids <- unique(top_specific_markers %>% pull(gene_id))
 #pdf("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/partition_marker_gene.pdf",width=8,height=8)
 plot_genes_by_group(cds,
                     top_specific_marker_ids,
-                    group_cells_by="partition",
+                    group_cells_by="clusters",
                     ordering_type="maximal_on_diag",
                     max.size=3)
 #dev.off()
@@ -327,23 +351,21 @@ top_specific_markers <- top_specific_markers[order(top_specific_markers$cell_gro
 ```{r}
 p<-ggplot(as.data.frame(pData(cds))) 
 
-#p1<-p + geom_violin(aes(x=partition,y=log10(Total_UMIs),fill=partition)) + monocle3:::monocle_theme_opts() + ggtitle("Total UMIs by partition")+ guides(fill=FALSE)
 p1<-p + geom_violin(aes(x=sample,y=log10(Total_UMIs),fill=sample)) + monocle3:::monocle_theme_opts() + ggtitle("Total UMIs by sample")+ guides(fill=FALSE)
 
-#p2<-p + geom_violin(aes(x=partition,y=log10(num_genes_expressed),fill=partition)) + monocle3:::monocle_theme_opts() + ggtitle("Num Genes Expressed by partition") + guides(fill=FALSE)
 p2<-p + geom_violin(aes(x=sample,y=log10(num_genes_expressed),fill=sample)) + monocle3:::monocle_theme_opts() + ggtitle("Num Genes Expressed by sample") + guides(fill=FALSE)
 
 p4 <- p +
-      geom_violin(aes(x=cluster, y=log10(Total_UMIs), fill = cluster)) +
-      labs(x= "cluster", y ="log10 UMI count") +
+      geom_violin(aes(x=clusters, y=log10(Total_UMIs), fill = clusters)) +
+      labs(x= "clusters", y ="log10 UMI count") +
       scale_color_brewer(palette = "Set1") +
       theme(legend.position = "none") +
       ggtitle("cluster vs UMI count") +
       monocle3:::monocle_theme_opts()
 
 p5 <- p +
-      geom_violin(aes(x=cluster, y=log10(num_genes_expressed), fill = cluster)) +
-      labs(x= "cluster", y ="log10 genes expressed") +
+      geom_violin(aes(x=clusters, y=log10(num_genes_expressed), fill = clusters)) +
+      labs(x= "clusters", y ="log10 genes expressed") +
       scale_color_brewer(palette = "Set1") +
       theme(legend.position = "none") +
       ggtitle("cluster vs genes expressed") +
@@ -382,7 +404,7 @@ pData(cds)$cycle_G2M_score <- cyc_results[['normalized.scores']]$G2M
 ```{r, eval = F}
 genes_of_interest <- c("Smo","Fmo2","Aebp1","Cftr","Clic3","Slpi","Met","Cdh3","Calcb")
 
-pdf(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/MENS_markers.pdf", width = 20, height = 20)
+pdf(file = here("plots/MENS_markers.pdf"), width = 20, height = 20)
 plot_cells(cds, genes = genes_of_interest, alpha = 0.5, group_label_size = 4)
 dev.off()
 ```
@@ -390,80 +412,27 @@ dev.off()
 # Annotations (manual)
 ```{r, eval = FALSE}
 
+#These clusters and annotations are based on the loaded embedding
+assertthat::assert_that(length(unique(pData(cds)$clusters)) == 15)
+
 pData(cds)$cell_type<-"Unknown"
 
-pData(cds)$cell_type[clusters(cds) == 1] <- "Macrophage-A"
-pData(cds)$cell_type[clusters(cds) == 2] <- "MENs"
-pData(cds)$cell_type[clusters(cds) == 3] <- "Macrophage-B" 
-pData(cds)$cell_type[clusters(cds) == 4] <- "Neuroglia"
-pData(cds)$cell_type[clusters(cds) == 5] <- "Smooth muscle cells" #smtn, Acta2
-pData(cds)$cell_type[clusters(cds) == 6] <- "Vascular endothelium"
-pData(cds)$cell_type[clusters(cds) == 7] <- "RBC"
-pData(cds)$cell_type[clusters(cds) == 8] <- "B Lymphocytes" #
-pData(cds)$cell_type[clusters(cds) == 9] <- "Pdgfra+ Fibroblasts" #
-pData(cds)$cell_type[clusters(cds) == 10] <- "Penk+ Fibroblasts" #
-pData(cds)$cell_type[clusters(cds) == 11] <- "T cells" #
-pData(cds)$cell_type[clusters(cds) == 12] <- "NK cells" #
+pData(cds)$cell_type[pData(cds)$clusters == 1] <- "Macrophage-A"
+pData(cds)$cell_type[pData(cds)$clusters == 2] <- "MENs"
+pData(cds)$cell_type[pData(cds)$clusters == 3] <- "Macrophage-B" 
+pData(cds)$cell_type[pData(cds)$clusters == 4] <- "Neuroglia"
+pData(cds)$cell_type[pData(cds)$clusters == 5] <- "Smooth muscle cells" #smtn, Acta2
+pData(cds)$cell_type[pData(cds)$clusters == 6] <- "Vascular endothelium"
+pData(cds)$cell_type[pData(cds)$clusters == 7] <- "RBC"
+pData(cds)$cell_type[pData(cds)$clusters == 8] <- "B Lymphocytes" #
+pData(cds)$cell_type[pData(cds)$clusters == 9] <- "Pdgfra+ Fibroblasts" #
+pData(cds)$cell_type[pData(cds)$clusters == 10] <- "Penk+ Fibroblasts" #
+pData(cds)$cell_type[pData(cds)$clusters == 11] <- "T cells" #
+pData(cds)$cell_type[pData(cds)$clusters == 12] <- "NK cells" #
 
-pData(cds)$cell_type[clusters(cds) == 13] <- "NENs" #snap25, epha5, 
-pData(cds)$cell_type[clusters(cds) == 14] <- "Macrophage-C" 
-pData(cds)$cell_type[clusters(cds) == 15] <- "Interstitium" 
-
-
-# pData(cds)$cell_type[clusters(cds) == 1] <- "Smooth muscle"
-# pData(cds)$cell_type[clusters(cds) == 2] <- "Mesothelial"
-# pData(cds)$cell_type[clusters(cds) == 3] <- "(Muscle?) Doublets" #high UMI count distribution, tropomyosin, actin
-# pData(cds)$cell_type[clusters(cds) == 4] <- "Erythroid"
-# pData(cds)$cell_type[clusters(cds) == 5] <- "NC derived Glia"
-# pData(cds)$cell_type[clusters(cds) == 6] <- "NENS"
-# pData(cds)$cell_type[clusters(cds) == 7] <- "MENS"
-# pData(cds)$cell_type[clusters(cds) == 8] <- "Intestinal epithelium" #Cldn7, Amn, muc13
-# pData(cds)$cell_type[clusters(cds) == 9] <- "Unknown" #cxcl14, grem1, nog, involved in bone morphogenic protein pathways
-# pData(cds)$cell_type[clusters(cds) == 10] <- "ICC?" #kit, ano1 - interstitial cells of cajal?
-# pData(cds)$cell_type[clusters(cds) == 11] <- "Vascular endothelium or monocyte/macropage" #Pecam1,Cd36,cd93, fapb4
-# pData(cds)$cell_type[clusters(cds) == 12] <- "Myeloid lineage" #Tyrobp, mrc1
-# #13,14,15 all enriched for p10 p11 cells
-# pData(cds)$cell_type[clusters(cds) == 13] <- "Doublets" #high umi count distribution
-# pData(cds)$cell_type[clusters(cds) == 14] <- "Fibroblasts?" #Mfap, collagens, fibrillin
-# pData(cds)$cell_type[clusters(cds) == 15] <- "G2/M" #mki67, top2a, cenpf
-
-
-#Original clusterings
-# pData(cds)$cell_type[partitions(cds) == 1] <-"Muscle" #cytoskeleton and myosin
-# pData(cds)$cell_type[partitions(cds) == 2] <-"mt enriched (bad cells?)" #seems relevant due to position on embedding
-# pData(cds)$cell_type[partitions(cds) == 3] <-"Unknown" #cell matrix expression (Mgp, Lum, Thbs2) and growth factors (fibin, pdgfr)
-# pData(cds)$cell_type[partitions(cds) == 4] <-"NENS (progenitors?) cells" #Sox10, Scn7a, Gpr37l1
-# #Could possibly be progenitors? glia? 
-# pData(cds)$cell_type[partitions(cds) == 5] <-"NENS" #neuron / neuroendrocrine functions: ptprn, nsg2, rtn1, Ret
-# 
-# pData(cds)$cell_type[partitions(cds) == 6] <-"Unknown" #Marker genes are enriched for collagen, microfibril components but not specific. Junk or fibroblasts?
-# 
-# pData(cds)$cell_type[partitions(cds) == 7] <-"Unknown" #kit, ano1 - interstitial cells of cajal?
-# 
-# pData(cds)$cell_type[partitions(cds) == 8] <-"Unknown" #mesothelial markers - UK3B, lrrn4, Msln, (igfbp6?)
-# 
-# pData(cds)$cell_type[partitions(cds) == 9] <-"Vascular Endothelium" #flt1 (VEGFR), Pecam1, ptprb, cd36
-# #similar expression to monocytes/platelets
-# 
-# pData(cds)$cell_type[partitions(cds) == 10] <-"Unknown" #cxcl14, grem1, nog, involved in bone morphogenic protein pathways
-# 
-# pData(cds)$cell_type[partitions(cds) == 11] <-"MENS?" #myeloid / microglia markers : Pf4, Csf1r, tyrobp, complement immunity system
-# 
-# pData(cds)$cell_type[partitions(cds) == 12] <-"erythroblasts" #hbb, snca, alas2
-# 
-# pData(cds)$cell_type[partitions(cds) == 13] <-"S/G2/M dividing cells" #cdca3, mki67, cenpf, top2a
-# 
-# pData(cds)$cell_type[partitions(cds) == 14] <-"Unknown"
-# 
-# pData(cds)$cell_type[partitions(cds) == 15] <-"Unknown" #T cell receptors (Cd3g,Trbc2) , Ptprc (CD45)
-# 
-# pData(cds)$cell_type[partitions(cds) == 16] <-"B cells" #cd79a/b, cd45+
-# 
-# pData(cds)$cell_type[partitions(cds) == 17] <-"Unknown"
-# 
-# pData(cds)$cell_type[partitions(cds) == 18] <-"Unknown" #only p10, no very specific markers
-# #Id4, nkx2-3
-
+pData(cds)$cell_type[pData(cds)$clusters == 13] <- "NENs" #snap25, epha5, 
+pData(cds)$cell_type[pData(cds)$clusters == 14] <- "Macrophage-C" 
+pData(cds)$cell_type[pData(cds)$clusters == 15] <- "Interstitium" 
 
 ```
 
@@ -472,16 +441,26 @@ lrt <- doDifferentialExpression(cds_obj = cds, method = "LRT",min_pct_cells_expr
                                 full = "~num_genes_expressed + mito_ratio + clusters",
                                 reduced = "~num_genes_expressed + mito_ratio")
 
-write.csv(lrt, file = "../results/de_genes_by_cluster.csv")
+write.csv(lrt, file = here("results/de_genes_by_cluster.csv"))
 lrt_filt <- lrt %>% filter(q_value < 0.05)
 print(qplot(lrt_filt$num_cells_expressed))
 #ensembl ids character vector
 de_genes <- pull(lrt_filt, gene_id)
 
 ```
+
 ```{r save}
-saveRDS(cds, file = "/home/jared/ENS/6mo_LMMP/6month_LMMP.rds")
-write.csv(colnames(cds)[pData(lmmp)$cell_type == "MENS"], "/home/jared/ENS/6mo_LMMP/results/MENS/6mo_mens_names.txt",quote = F, row.names = F)
+saveRDS(cds, file = here("6month_LMMP.rds"))
+write.csv(colnames(cds)[pData(cds)$cell_type == "MENS"], here("results/MENS/6mo_mens_names.txt"),quote = F, row.names = F)
+```
+
+```{r}
+if(!file.exists(here("results/lmmp_umap_clusters_og.csv"))){
+
+  pdat <- cbind(as.data.frame(reducedDim(cds, "UMAP")), as.data.frame(pData(cds)$clusters), as.data.frame(reducedDim(cds, "Aligned")))
+  colnames(pdat) <- c("UMAP_1","UMAP_2","clusters",paste0("Aligned_PC",1:50))
+
+}
 ```
 
 # Session Information

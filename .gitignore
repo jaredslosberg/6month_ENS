@@ -15,9 +15,15 @@ tabula_muris/*
 !tabula_muris/scripts
 teichman_gut_atlas/*
 !teichman_gut_atlas/scripts
-
+vanderbilt/
+!vanderbilt/scripts
 
 preprocessing/
+
+#This isn't working
+!preprocessing/scripts
+!preprocessing/bustools_required_files_10xv2_mm/737K-august-2016.txt
+
 projections/
 
 
