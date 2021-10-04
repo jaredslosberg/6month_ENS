@@ -12,9 +12,9 @@ results/
 preprocessing/bus_output/
 plots/
 tabula_muris/*
-!tabula_muris/scripts
+!tabula_muris/scripts/*.R
 teichman_gut_atlas/*
-!teichman_gut_atlas/scripts
+!teichman_gut_atlas/scripts/*.Rmd
 vanderbilt/
 !vanderbilt/scripts
 

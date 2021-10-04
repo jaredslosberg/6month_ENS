@@ -1,6 +1,5 @@
 ---
-title: "Cell cycle classification"
-author: Jared Slosberg
+title: "R Notebook"
 output: html_notebook
 ---
 
@@ -15,32 +14,58 @@ if(interactive()){
 ```
 
 
-```{r}
-library(monocle3)
-library(tricycle)
-library(SingleCellExperiment)
-library(scater)
-library(cowplot)
+```{r load, message = F, results= 'hide'}
 library(ggplot2)
-library(here)
 library(dplyr)
-source(here("scripts/accessory_functions/monocle_mods.R"))
+library(monocle3)
+library(here)
+library(purrr)
+library(tricycle)
+
+
+```
+
+
+```{r init}
+
+teichman_mesenchymal_atlas_filename <- "/data/users/jared/atlas_processing/gut_cell_atlas/data/mesenchymal_gut.Rds"
+
+cds <- readRDS(teichman_mesenchymal_atlas_filename)
 ```
 
 
 ```{r}
-cds <- readRDS(here("6month_LMMP.rds"))
+plot_cells(cds)
+
+reducedDims(cds)
+
+cds <- preprocess_cds(cds)
+plot_pc_variance_explained(cds) 
 ```
 
 ```{r}
-rownames(cds) <- fData(cds)[,"gene_id_trimmed"]
+cds <- preprocess_cds(cds, num_dim = 30, verbose = T)
 
+pData(cds)$sample_name <- pData(cds)[,"sample name"]
+pData(cds)[,"sample name"] <- NULL
+pData(cds)[,"Sample name"] <- NULL
+
+
+#can't align on batch bc there are >150 batches, many have only a few cells in this subset
+cds <- align_cds(cds, residual_model_formula_str = "~ sample_name + total_counts", verbose = T)
+
+set.seed(152)
+cds <- reduce_dimension(cds, cores = 8)
+plot_cells(cds)
+```
+
+```{r}
 assay(cds, "logcounts") <- normalized_counts(cds)
 
 cds <- tricycle::project_cycle_space(cds, exprs_values = "logcounts")
   
 #plot pca
-p1 <- plot_cells_mod(cds, reduction_method = "tricycleEmbedding") +
+p1 <- plot_cells(cds, reduction_method = "tricycleEmbedding") +
   labs(x = "Projected PC1", y = "Projected PC2") +
   ggtitle(sprintf("Projected cell cycle space (n=%d)",
                   ncol(cds))) + 
@@ -49,11 +74,11 @@ p1 <- plot_cells_mod(cds, reduction_method = "tricycleEmbedding") +
 cds <- estimate_cycle_position(cds)
 
 #plot pca
-p2 <- plot_cells_mod(cds, reduction_method = "tricycleEmbedding", color_cells_by = "tricyclePosition") +
+p2 <- plot_cells(cds, reduction_method = "tricycleEmbedding", colour_by = "tricyclePosition") +
   labs(x = "Projected PC1", y = "Projected PC2") +
   ggtitle(sprintf("Projected cell cycle space (n=%d)",
                   ncol(cds))) + 
-  theme_bw(base_size = 14)
+  theme_bw(base_size = 14)rownames(cds) <- fData(cds)[,"gene_id_trimmed"]
 
 ```
 
@@ -61,18 +86,11 @@ p2 <- plot_cells_mod(cds, reduction_method = "tricycleEmbedding", color_cells_by
 #schwabe
 cds <- estimate_cycle_stage(cds, gname.type = 'ENSEMBL', species = 'mouse', exprs_values = "logcounts")
 
-plot_cells_mod(cds, reduction_method = "tricycleEmbedding", color_cells_by = "CCStage") +
+plot_cells(cds, reduction_method = "tricycleEmbedding", colour_by = "CCStage") +
   labs(x = "Projected PC1", y = "Projected PC2") +
   ggtitle(sprintf("Projected cell cycle space (n=%d)",
                   ncol(cds))) +
   theme_bw(base_size = 14)
-
-plot_cells(cds, reduction_method = "UMAP", color_cells_by = "CCStage") +
-  ggtitle("Schwabe cell cycle stages")
-
-ggplot(as.data.frame(pData(cds)), aes(x = CCStage, y = tricyclePosition, color = CCStage)) +
-  geom_violin() +
-  geom_boxplot(width = 0.1) 
 
 ##cylic scale
 p <- plot_emb_circle_scale(cds, dimred = 1, point.size = 3.5, point.alpha = 0.9) +
@@ -90,18 +108,9 @@ pData(cds)[,"tricyclePosition"] <- tric_pos
 p<-plot_emb_circle_scale(cds, dimred = "UMAP", color_by = "tricyclePosition")
 p4 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.1))
 
-
-```
-
-```{r}
 print(p1)
 print(p2)
 print(p3)
 print(p4)
-```
 
-```{r}
-saveRDS(cds, here("6month_LMMP.rds"))
-sessionInfo()
 ```
-

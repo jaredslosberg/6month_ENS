@@ -25,26 +25,27 @@ library(ComplexHeatmap)
 library(NNLM)
 library(viridis)
 library(htmlwidgets)
+library(here)
+library(glue)
 
-source("./accessory_functions/monocle_mods.R")
-source("./accessory_functions/doDifferentialExpression.R")
-source("./accessory_functions/pattern_plotting.R")
-source("./accessory_functions/geneSetEnrichment.R")
-source("./accessory_functions/cluster_genes_mod.R")
-source("./accessory_functions/transferAnnotations.R")
+source(here("scripts/accessory_functions/monocle_mods.R"))
+source(here("scripts/accessory_functions/doDifferentialExpression.R"))
+source(here("scripts/accessory_functions/pattern_plotting.R"))
+source(here("scripts/accessory_functions/geneSetEnrichment.R"))
+source(here("scripts/accessory_functions/cluster_genes_mod.R"))
+source(here("scripts/accessory_functions/transferAnnotations.R"))
 
 set.seed(138)
 ```
 
 ```{r}
 #MENS subset
-lmmp <- readRDS("../6month_LMMP.rds")
-getwd()
-#After running the above script and determining which quality cells are in the MEN population, subset on these
-MENS_cell_names <- read.csv("../results/MENS/6mo_mens_names.txt", header = T)
-MENS_cell_names <-as.character(MENS_cell_names$x)
+lmmp <- readRDS(here("6month_LMMP.rds"))
 
-MENS <- lmmp[,MENS_cell_names]
+#After running the above script and determining which quality cells are in the MEN population, subset on these
+
+
+MENS <- lmmp[,pData(lmmp)$cell_type == "MENs"]
 
 MENS <- estimate_size_factors(MENS)
 MENS <- preprocess_cds(MENS, num_dim = 10, verbose=TRUE)
@@ -56,7 +57,7 @@ pData(MENS)$batch<-pData(MENS)$sample
 pData(MENS)$log10UMI <- log10(pData(MENS)$Total_UMIs)
 
 
-MENS <- align_cds(MENS, num_dim = 10, alignment_group = "batch",alignment_k = 20,verbose=T)
+MENS <- align_cds(MENS, num_dim = 10, residual_model_formula_str = "~ batch + num_genes_expressed",alignment_k = 20,verbose=T)
 MENS <- reduce_dimension(MENS,max_components=2,cores=4,verbose=TRUE)
 MENS <- cluster_cells(MENS, k=20, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-03)
 plot_cells(MENS)
@@ -81,7 +82,7 @@ top_specific_markers <- marker_test_res %>%
 
 dt <- DT::datatable(top_specific_markers)
 
-htmlwidgets::saveWidget(dt, file = "../results/MENS_subset_cluster_markers.html")
+htmlwidgets::saveWidget(dt, file = "../results/MENS/MENS_subset_cluster_markers.html")
 
 
 
@@ -91,28 +92,6 @@ htmlwidgets::saveWidget(dt, file = "../results/MENS_subset_cluster_markers.html"
 ```
 
 
-```{r cellcycle, eval  =F}
-
-cc_features <- c("cycle_phase","cycle_G1_score","cycle_S_score","cycle_G2M_score")
-
-for(feat in cc_features){
-  MENS <- transferAnnotations(to_annotate_cds = MENS, annotated_cds = lmmp, by_cluster = F, annotation_name = "feat")
-
-}  
-  # mm.pairs <- readRDS(system.file("exdata", "mouse_cycle_markers.rds", package="scran"))
-# 
-# exprs.mat <- exprs(MENS)
-# rownames(exprs.mat) <- fData(MENS)$gene_id_trimmed
-# cyc_results <- cyclone(exprs.mat, pairs = mm.pairs, verbose = T)
-# 
-# pData(MENS)$cycle_phase <- cyc_results[['phases']]
-# 
-# pData(MENS)$cycle_G1_score <- cyc_results[['normalized.scores']]$G1
-# pData(MENS)$cycle_S_score <- cyc_results[['normalized.scores']]$S
-# pData(MENS)$cycle_G2M_score <- cyc_results[['normalized.scores']]$G2M
-
-
-```
 
 ```{r}
 #pdf("/home/jared/ENS/Timecourse_ENS/plots/MENS.pdf")
@@ -254,7 +233,7 @@ ggplot(ribo_tx_counts, aes(cluster, tx_count)) + geom_col(aes(fill = norm), posi
 MENS_sub <- estimate_size_factors(MENS_sub)
 MENS_sub <- preprocess_cds(MENS_sub, num_dim = 5, verbose=TRUE)
 MENS_sub <- reduce_dimension(MENS_sub,max_components=2,cores=4,verbose=TRUE)
-MENS_sub <- align_cds(MENS_sub, num_dim = 5, alignment_group = "batch",alignment_k = 20,verbose=T)
+MENS_sub <- align_cds(MENS_sub, num_dim = 5, alignment_group = "batch + log10genes",alignment_k = 20,verbose=T)
 MENS_sub <- reduce_dimension(MENS_sub,max_components=2,cores=4,verbose=TRUE)
 MENS_sub <- cluster_cells(MENS_sub, k=20, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-04)
 plot_cells(MENS_sub)
@@ -278,8 +257,9 @@ plot_cells(MENS, color_cells_by = "cycle_G2M_score")
 
 
 ```{r patternAnalysis, message=F}
+
 set.seed(155)
-date = "11-25"
+date = "10-4"
 
 MENS <- estimate_size_factors(MENS)
 print(dim(MENS))
@@ -318,16 +298,20 @@ cell_mat <- decomp$H[,cells_order]
 stopifnot(colnames(cell_mat) == cells_order)
 
 
-pdf(paste0("../plots/NMF/MENS/MENS_",date,"_k_40_log_cellsize_cellweights.pdf"), width = 10)
+pdf(here(glue("plots/NMF/MENS/MENS_{date}_k_40_log_cellsize_cellweights.pdf")), width = 10)
 plot_cells(MENS, color_cells_by = group_feature, group_label_size = 3)
 
-ComplexHeatmap::Heatmap(cell_mat, name = "cellscore",
+hm <- ComplexHeatmap::Heatmap(cell_mat, name = "cellscore",
                         top_annotation = ha_cellgroup,
                         column_order = cells_order,
                         #cluster_columns = cluster_within_group(cell_mat, groups_to_cluster),
                         show_column_names = F)
                         #row_order = rownames(decomp$H))
+
+hm
 dev.off()
+
+hm
 
 ##Gene weights associated with patterns
 geneWeights.df <- as.data.frame(decomp$W)
@@ -336,7 +320,10 @@ colnames(geneWeights.df)<-paste0("cellPattern",c(1:npattern))
 cellWeights.df <- base::as.data.frame(t(decomp$H))
 colnames(cellWeights.df) = paste0("cellPattern",c(1:npattern))
 
+```
 
+
+```{r}
 #This adds pattern cell weights to pData, make sure they align
 #left_join() would be more specific than this cbind()
 add.to.cds <- 1
@@ -353,35 +340,22 @@ weighted_emb <- lapply(1:npattern,
                        cds_obj = MENS,
                        red_method <- "UMAP",
                        do.clip <- c(0.02,.98))
+
 png(paste0("../plots/NMF/MENS/MENS_",date,"_NMF_Patterns.png"), height= 2000, width = 2000)
 print(do.call(ggarrange, weighted_emb[1:npattern]))
 dev.off()
 
 
-#Look at pattern usage over cell age
-plot_over_time <- 0
-if(plot_over_time){
-  condition_patterns<- as.list(1:npattern)
-  myplots <- lapply(paste0("cellPattern",condition_patterns), 
-                    FUN= plotPatternUsageByCondition,
-                    cds = MENS,
-                    bin_by = "age")
-  pdf(paste0("../plots/NMF/MENS/MENS_",date,"_patterns_over_age.pdf"), height= 20, width = 20)
-  print(do.call(ggarrange, myplots[1:length(condition_patterns)]))
-  dev.off()
-}
+tmp<-as.data.frame(merge(fData(MENS)[,c("gene_id","gene_short_name")],geneWeights.df,by=0))
+dt<- DT::datatable(tmp[,c("gene_id","gene_short_name",
+                      unlist(lapply(1:npattern,function(i){paste0("cellPattern",i)}))
+)])
 
+saveWidget(dt, file = here("results/NMF/MENS/MENS_10-31_pattern_gene_weights.html"))
 
-# tmp<-as.data.frame(merge(fData(MENS)[,c("gene_id","gene_short_name")],geneWeights.df,by=0))
-# dt<- DT::datatable(tmp[,c("gene_id","gene_short_name",
-#                      unlist(lapply(1:npattern,function(i){paste0("cellPattern",i)}))
-# )])
+write.csv(cellWeights.df, here(glue("results/NMF/MENS/MENS_{date}_log_cellsize_pattern_cell_weights.csv")))
 
-#saveWidget(dt, file = "./results/NMF/MENS/MENS_10-31_pattern_gene_weights.html")
-
-write.csv(cellWeights.df, paste0("../results/NMF/MENS/MENS_",date,"_log_cellsize_pattern_cell_weights.csv"))
-
-write.csv(geneWeights.df, paste0("../results/NMF/MENS/MENS_",date,"_log_cellsize_pattern_gene_weights.csv"))
+write.csv(geneWeights.df, here(glue("results/NMF/MENS/MENS_{date}_log_cellsize_pattern_gene_weights.csv")))
 
 ```
 
@@ -433,7 +407,7 @@ heatmap_figure_list <- lapply(features, function(feature){
 })
 
 
-pdf(paste0("../plots/NMF/MENS/MENS_",date,"_pattern_11-25_categorical_feature_correlation.pdf"), height= 8, width = 8)
+pdf(here(glue("plots/NMF/MENS/MENS_{date}_pattern_11-25_categorical_feature_correlation.pdf")), height= 8, width = 8)
 print(heatmap_figure_list)
 dev.off()
 
@@ -446,11 +420,50 @@ dev.off()
 
 geneWeights.df <- geneWeights.df %>% tibble::rownames_to_column(var = "gene_id")
 geneSetEnrichment(gene_weights = geneWeights.df, n_genes = 1500, n_patterns = 40,
-                  file_prefix = paste0("../results/GSEA/mens/MENS_",date,"_pattern_gene_weights"))
+                  file_prefix = here(glue("results/GSEA/mens/MENS_{date}_pattern_gene_weights"))
 
 ```
 
+##Usage of patterns learned in LMMP 
 ```{r}
-saveRDS(MENS, file = "../6mo_MENS_11-25.rds")
+#Remove existing pattern weights
+pData(MENS) <- dplyr::select(as.data.frame(pData(MENS)), !starts_with("cellPattern")) %>% DataFrame()
+
+#load and name column 1 with cell ids. can't be rownames for merge
+lmmp_cell_wts <- read.csv(here("results/NMF/lmmp/old_pattern_run/50dims/pattern_cell_weights.csv"))
+colnames(lmmp_cell_wts)[1] <- "cell_id"
+
+lmmp_gene_wts <- read.csv(here("results/NMF/lmmp/old_pattern_run/50dims/pattern_gene_weights.csv"), row.names = 1)
+
+n_lmmp_patts <- 50
+
+pdat <- pData(MENS) %>% as.data.frame() %>% mutate("cell_id" = paste(barcode, sample, sep = "."))
+
+pData(MENS) <- left_join(pdat,lmmp_cell_wts, by= "cell_id") %>% DataFrame()
+rownames(pData(MENS)) <- pData(MENS)$cell_id
+
+```
+
+
+
+```{r}
+#Color UMAP embedding by cell weights for each pattern.
+#Call function and return a list of ggplot objects, and plot to one page
+weighted_emb <- lapply(1:n_lmmp_patts,
+                       FUN = plotCellPatterns,
+                       cds_obj = MENS,
+                       red_method <- "UMAP",
+                       do.clip <- c(0.02,.98))
+
+png(here("plots/NMF/MENS/MENS_subset_lmmp_patterns.png"), height= 2000, width = 2000)
+print(do.call(ggarrange, weighted_emb[1:n_lmmp_patts]))
+dev.off()
+
+```
+ 
+
+
+```{r}
+saveRDS(MENS, file = here(glue("6mo_MENS_{date}.rds")))
 sessionInfo()
 ```

@@ -23,9 +23,10 @@ library(scales)
 library(scran)
 library(here)
 library(purrr)
+library(here)
 
-source("./accessory_functions/doDifferentialExpression.R")
-source("./accessory_functions/assignCC.R")
+source(here("scripts/accessory_functions/doDifferentialExpression.R"))
+source(here("scripts/accessory_functions/assignCC.R"))
 
 directs <- c("data","plots","results")
 map(directs, function(dir){
@@ -39,14 +40,6 @@ map(directs, function(dir){
 # Create monocle sc object from kallisto pipeline output
 # Generate knee plots and filter each sample by a minimum UMI count per cell
 ```{r}
-# tr2g <- transcript2gene(species = "Mus musculus", 
-#                         kallisto_out_path = "../kallisto_out/p10",
-#                         ensembl_version = 98)
-
-# Read Transcript->Gene mapping
-#tr2g <- readr::read_tsv("~/Goff_Lab/Velocity_index/mouse/tr2g.tsv", col_names = FALSE)
-#colnames(tr2g)<-c("transcript","gene")
-
 samples<-c("TH","TL") 
 
 
@@ -72,13 +65,12 @@ for (i in 1:length(samples)){
     
     cds_list<-c(cds_list,cds)
 }
+
 # Find low UMI cells
 numExpected<-6000 #cells targeted
 UMI_cutoff<-1000
-#pdf("~/Goff_Lab/Kulkarni_ENS/Analysis/Knee-plots-test.pdf",width=6,height=6)
 lapply(1:length(samples), function(sampleIdx){
     print(samples[sampleIdx])
-    #tot_counts<-Matrix::colSums(exprs(cds_list[[sampleIdx]]))
     bc_rank <- barcodeRanks(exprs(cds_list[[sampleIdx]]), lower = 80)
     
     print(qplot(bc_rank$total, bc_rank$rank, geom = "line") +
@@ -99,7 +91,7 @@ lapply(1:length(samples), function(sampleIdx){
       ggtitle(paste0("Knee Plot - ",samples[sampleIdx]))
     )
 })
-#dev.off()
+
 
 #How many cells would remain for different UMI cut offs?
 UMI_num_cells <- list("starting.droplets" = NA, "UMI.at.knee" = NA, "cells.at.knee" = NA, "cells.at.expected.UMI" =NA, "UMI.at.expected.cells" = NA)
@@ -123,7 +115,7 @@ UMI_num_cells <- lapply(1:length(samples), function(sampleIdx){
 Do the filtering at specified cutoffs
 ```{r}
 # Filter emtpy droplets
-UMI_cutoff<-200 #If doing consistent threshold across samples, set this and change following
+UMI_cutoff<-200 
 filtered_cds_list<-lapply(cds_list,function(cds){
   pData(cds)$Total_UMIs<-Matrix::colSums(exprs(cds))
   #bc_rank <- barcodeRanks(exprs(cds))
@@ -133,7 +125,7 @@ filtered_cds_list<-lapply(cds_list,function(cds){
   return(filtered_cds)
 })
  
-#mitochondrial filtering here if desired
+#mitochondrial filtering is in a chunk below, after gene name conversion
 
 # How many cells remain per sample?
 lapply(filtered_cds_list,function(x){dim(x)[2]})
@@ -158,14 +150,8 @@ pData(cds)$log10UMI <- log10(pData(cds)$Total_UMIs)
 
 ## Get and add gene symbols from biomart
 ```{r}
-#Gene ID mappings using org.mm.eg are good but return "NA" for about half of ensembl id's, including many mitochondrial genes
-#fData(cds)$gene_id_trimmed<-stringr::str_split_fixed(fData(cds)$gene_id,"\\.",2)[,1]
-#symb <- mapIds(org.Mm.eg.db, keys=fData(cds)$gene_id_trimmed, keytype="ENSEMBL", column="SYMBOL")
-#fData(cds)<-merge(fData(cds),as.data.frame(symb),by.x="gene_id_trimmed",by.y=0, all.x = TRUE,sort=FALSE)
-#colnames(fData(cds))<-c("gene_id_trimmed","gene_id","num_cells_expressed","gene_short_name")
+#With BioMart, get gene names, make sure to use the right ensembl archive for genome used for alignment
 
-#Playing with BioMart, get gene names, make sure to use the right ensembl archive for genome used for alignment
-listMarts()
 ensembl <- useMart("ensembl", host = "http://jul2019.archive.ensembl.org/") #mm 97
 datasets <- listDatasets(ensembl)
 ensembl <- useDataset("mmusculus_gene_ensembl",mart=ensembl)
@@ -203,15 +189,8 @@ for(i in 1:length(samples)){
 
 cds <- cds[, pData(cds)$mito_ratio < .20]
 
-
-#cds[,pData(cds)$Total_UMIs > 0]
 use_genes <- Matrix::rowSums(exprs(cds)) > 0
 cds <- cds[use_genes,]
-
-#If we wanted to exclude low and very high expressed genes 
-sum(fData(cds)$num_reads > 10 & fData(cds)$num_cells_expressed > 3)
-sum(fData(cds)$num_cells_expressed > dim(cds)[2] * 0.6)
-
 
 for(i in 1:length(samples)){
   print(samples[i])
@@ -234,9 +213,11 @@ assay(cds, "logcounts") <- normalized_counts(cds, norm_method = "log")
 
 # Dimensionality Reduction
 ```{r}
+set.seed(041)
+
 do.existing.embedding <- T
 if(do.existing.embedding){
-  pdat <- read.csv(here("results/lmmp_umap_clusters_og.csv"), row.names = 1)
+  pdat <- read.csv(here("results/lmmp_umap_clusters_man.csv"), row.names = 1)
   
   assertthat::assert_that(all(rownames(pdat) == colnames(cds)))
   
@@ -268,7 +249,7 @@ plot_cells(cds,genes=c("Sox10","Ret","Uchl1","Snap25"),cell_size=0.8)
 if(!do.existing.embedding){
   set.seed(502)
   
-  cds <- align_cds(cds, num_dim = 50, alignment_group = "sample",alignment_k = 20,verbose=T)
+  cds <- align_cds(cds, num_dim = 50, residual_model_formula_str = "~batch + num_genes_expressed",alignment_k = 20,verbose=T)
   cds <- reduce_dimension(cds,max_components=2,cores=4,verbose=TRUE)
   #cds <- order_cells(cds)
   
@@ -308,11 +289,7 @@ plot_cells(cds, color_cells_by = "log10UMI")
 ```{r, message= F, results= 'hide', warning=F}
 marker_test_res <- top_markers(cds, group_cells_by="clusters", cores=1,verbose=F, genes_to_test_per_group = 30)
 
-#saveRDS(object = cds, file = "~/Goff_Lab/Kulkarni_ENS/Analysis/ENS_merged_samples.rds")
-#cds<-readRDS(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/ENS_merged_samples.rds")
-
-#write.table(x = marker_test_res,file = "~/Goff_Lab/Kulkarni_ENS/Analysis/partition_markers.tsv",sep = "\t",quote = F, col.names = T)
-#marker_test_res <- read.delim(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/partition_markers.tsv", sep = "\t", header = T)
+write.table(x = marker_test_res,file = here("results/cluster_markers.tsv"),sep = "\t",quote = F, col.names = T)
 ```
 
 ```{r}
@@ -323,16 +300,11 @@ top_specific_markers <- marker_test_res %>%
 
 top_specific_marker_ids <- unique(top_specific_markers %>% pull(gene_id))
 
-
-
-#pdf("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/partition_marker_gene.pdf",width=8,height=8)
 plot_genes_by_group(cds,
                     top_specific_marker_ids,
                     group_cells_by="clusters",
                     ordering_type="maximal_on_diag",
                     max.size=3)
-#dev.off()
-
 
 top_specific_markers <- marker_test_res %>%
                             filter(fraction_expressing >= 0.00) %>%
@@ -340,7 +312,6 @@ top_specific_markers <- marker_test_res %>%
                             top_n(30, pseudo_R2)
 
 dt <- DT::datatable(top_specific_markers)
-#htmlwidgets::saveWidget(dt, file = "")
 
 top_specific_markers <- top_specific_markers[order(top_specific_markers$cell_group),]
 
@@ -371,13 +342,12 @@ p5 <- p +
       ggtitle("cluster vs genes expressed") +
       monocle3:::monocle_theme_opts()
 
-#pdf("~/Goff_Lab/Kulkarni_ENS/6month_LMMP/plots/qc_by_sample.pdf",width=10,height=5)
 p1
 p2
 
 p4
 p5
-#dev.off()
+
 ```
 
 
@@ -401,7 +371,7 @@ pData(cds)$cycle_G2M_score <- cyc_results[['normalized.scores']]$G2M
 ```
 
 # Gene expression plots for annotations
-```{r, eval = F}
+```{r, eval = T}
 genes_of_interest <- c("Smo","Fmo2","Aebp1","Cftr","Clic3","Slpi","Met","Cdh3","Calcb")
 
 pdf(file = here("plots/MENS_markers.pdf"), width = 20, height = 20)
@@ -410,30 +380,56 @@ dev.off()
 ```
 
 # Annotations (manual)
-```{r, eval = FALSE}
+```{r, eval =T}
 
 #These clusters and annotations are based on the loaded embedding
-assertthat::assert_that(length(unique(pData(cds)$clusters)) == 15)
+if(do.existing.embedding){
 
-pData(cds)$cell_type<-"Unknown"
-
-pData(cds)$cell_type[pData(cds)$clusters == 1] <- "Macrophage-A"
-pData(cds)$cell_type[pData(cds)$clusters == 2] <- "MENs"
-pData(cds)$cell_type[pData(cds)$clusters == 3] <- "Macrophage-B" 
-pData(cds)$cell_type[pData(cds)$clusters == 4] <- "Neuroglia"
-pData(cds)$cell_type[pData(cds)$clusters == 5] <- "Smooth muscle cells" #smtn, Acta2
-pData(cds)$cell_type[pData(cds)$clusters == 6] <- "Vascular endothelium"
-pData(cds)$cell_type[pData(cds)$clusters == 7] <- "RBC"
-pData(cds)$cell_type[pData(cds)$clusters == 8] <- "B Lymphocytes" #
-pData(cds)$cell_type[pData(cds)$clusters == 9] <- "Pdgfra+ Fibroblasts" #
-pData(cds)$cell_type[pData(cds)$clusters == 10] <- "Penk+ Fibroblasts" #
-pData(cds)$cell_type[pData(cds)$clusters == 11] <- "T cells" #
-pData(cds)$cell_type[pData(cds)$clusters == 12] <- "NK cells" #
-
-pData(cds)$cell_type[pData(cds)$clusters == 13] <- "NENs" #snap25, epha5, 
-pData(cds)$cell_type[pData(cds)$clusters == 14] <- "Macrophage-C" 
-pData(cds)$cell_type[pData(cds)$clusters == 15] <- "Interstitium" 
-
+  pData(cds)$cell_type<-"Unknown"
+  
+  pData(cds)$cell_type[pData(cds)$clusters == 1] <- "Macrophage-A"
+  pData(cds)$cell_type[pData(cds)$clusters == 2] <- "MENs"
+  pData(cds)$cell_type[pData(cds)$clusters == 3] <- "Macrophage-B" 
+  pData(cds)$cell_type[pData(cds)$clusters == 4] <- "Neuroglia"
+  pData(cds)$cell_type[pData(cds)$clusters == 5] <- "Smooth muscle cells" #smtn, Acta2
+  pData(cds)$cell_type[pData(cds)$clusters == 6] <- "Vascular endothelium"
+  pData(cds)$cell_type[pData(cds)$clusters == 7] <- "RBC"
+  pData(cds)$cell_type[pData(cds)$clusters == 8] <- "B Lymphocytes" #
+  pData(cds)$cell_type[pData(cds)$clusters == 9] <- "Pdgfra+ Fibroblasts" #
+  pData(cds)$cell_type[pData(cds)$clusters == 10] <- "Penk+ Fibroblasts" #
+  pData(cds)$cell_type[pData(cds)$clusters == 11] <- "T cells" #
+  pData(cds)$cell_type[pData(cds)$clusters == 12] <- "NK cells" #
+  
+  pData(cds)$cell_type[pData(cds)$clusters == 13] <- "NENs" #snap25, epha5, 
+  pData(cds)$cell_type[pData(cds)$clusters == 14] <- "Macrophage-C" 
+  pData(cds)$cell_type[pData(cds)$clusters == 15] <- "Interstitium" 
+} else{
+  
+  
+  pData(cds)$cell_type<-"Unknown"
+  
+  pData(cds)$cell_type[pData(cds)$clusters == 1] <- "MENs"
+  pData(cds)$cell_type[pData(cds)$clusters == 2] <- "Macrophage-A"
+  pData(cds)$cell_type[pData(cds)$clusters == 3] <- "Macrophage-B" 
+  pData(cds)$cell_type[pData(cds)$clusters == 4] <- "Neuroglia"
+  pData(cds)$cell_type[pData(cds)$clusters == 5] <- "Vascular endothelium"
+  pData(cds)$cell_type[pData(cds)$clusters == 6] <- "Smooth muscle cells" #smtn, Acta2
+  pData(cds)$cell_type[pData(cds)$clusters == 7] <- "RBC"
+  pData(cds)$cell_type[pData(cds)$clusters == 8] <- "RBC"
+  pData(cds)$cell_type[pData(cds)$clusters == 9] <- "B Lymphocytes" #
+  pData(cds)$cell_type[pData(cds)$clusters == 10] <-  "Pdgfra+ Fibroblasts" #
+  pData(cds)$cell_type[pData(cds)$clusters == 11] <- "Penk+ Fibroblasts"   
+  #pData(cds)$cell_type[pData(cds)$clusters == 12] <- "Macrophage-A"
+  pData(cds)$cell_type[pData(cds)$clusters == 13] <- "T cells"
+  pData(cds)$cell_type[pData(cds)$clusters == 14] <- "NENs"
+  pData(cds)$cell_type[pData(cds)$clusters == 15] <- "NK cells"
+  pData(cds)$cell_type[pData(cds)$clusters == 16] <- "NK cells"
+  pData(cds)$cell_type[pData(cds)$clusters == 17] <- "Smooth muscle cells B"
+  pData(cds)$cell_type[pData(cds)$clusters == 18] <- "Interstitium"
+  pData(cds)$cell_type[pData(cds)$clusters == 19] <- "Macrophage-C" 
+  pData(cds)$cell_type[pData(cds)$clusters == 20] <- "NENs" 
+  
+}
 ```
 
 ```{r do_diff_expression}
@@ -444,6 +440,7 @@ lrt <- doDifferentialExpression(cds_obj = cds, method = "LRT",min_pct_cells_expr
 write.csv(lrt, file = here("results/de_genes_by_cluster.csv"))
 lrt_filt <- lrt %>% filter(q_value < 0.05)
 print(qplot(lrt_filt$num_cells_expressed))
+
 #ensembl ids character vector
 de_genes <- pull(lrt_filt, gene_id)
 
@@ -455,7 +452,7 @@ write.csv(colnames(cds)[pData(cds)$cell_type == "MENS"], here("results/MENS/6mo_
 ```
 
 ```{r}
-if(!file.exists(here("results/lmmp_umap_clusters_og.csv"))){
+if(!file.exists(here("results/lmmp_umap_clusters_man.csv"))){
 
   pdat <- cbind(as.data.frame(reducedDim(cds, "UMAP")), as.data.frame(pData(cds)$clusters), as.data.frame(reducedDim(cds, "Aligned")))
   colnames(pdat) <- c("UMAP_1","UMAP_2","clusters",paste0("Aligned_PC",1:50))
