@@ -1,5 +1,5 @@
 #!/bin/bash
-mkdir -p data/ plots/ 
+mkdir -p data/ plots/NMF/ results/ results/GSEA/lmmp results/GSEA/mens results/NMF/MENS results/NMF/lmmp results/MENS
 
 #setwd to project home
 
@@ -15,17 +15,19 @@ R -e "rmarkdown::render('scripts/tricycle_analysis.Rmd', output_format = 'html_d
 #depends on MES_6mo_LMMP_analysis.Rmd
 R -e "rmarkdown::render('scripts/pattern_analysis.Rmd', output_format = 'html_document')"
 
-#depends on pattern_analysis.Rmd
-R -e "rmarkdown::render('scripts/NMF_UMI_correlation.Rmd', output_format = 'html_document')"
-
 #depends on MES_6mo_LMMP_analysis.Rmd
 R -e "rmarkdown::render('scripts/6mo_MENS_followup.Rmd', output_format = 'html_document')"
 
 #Velocity analysis
 
-#depends on MES_6mo_LMMP_analysis.Rmd
-R -e "rmarkdown::render('scripts/6mo_MENS_followup.Rmd', output_format = 'html_document')"
-
 #Requires building scvelocity.yml
 conda activate scVelocity
 jupyter nbconvert --to notebook --execute ./velocity/scripts/velocity.ipynb
+
+
+#Figures and supplemental figures
+Rscript --vanilla atlas_projections.R
+Rscript --vanilla cluster_expression_violin.R
+Rscript --vanilla lmmp_NMF_heatmap.R
+Rscript --vanilla neuronal_markers_sparklines.R
+Rscript --vanilla suppl_figure_sparklines.R

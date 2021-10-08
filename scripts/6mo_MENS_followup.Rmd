@@ -73,7 +73,7 @@ pData(MENS)$assigned_cluster <- pData(MENS)$clusters
 
 ```
 
-```{r markers, eval = F}
+```{r markers, eval = T, cache = T}
 marker_test_res <- top_markers(MENS, group_cells_by="cluster", cores=8,verbose=T)
 top_specific_markers <- marker_test_res %>%
                             filter(fraction_expressing >= 0.10) %>%
@@ -82,7 +82,7 @@ top_specific_markers <- marker_test_res %>%
 
 dt <- DT::datatable(top_specific_markers)
 
-htmlwidgets::saveWidget(dt, file = "../results/MENS/MENS_subset_cluster_markers.html")
+htmlwidgets::saveWidget(dt, file = here("results/MENS/MENS_subset_cluster_markers.html"))
 
 
 
@@ -114,7 +114,7 @@ p1
 ```
 
 
-```{r, pseudotime, eval = F}
+```{r, pseudotime, eval = T}
 MENS <- learn_graph(MENS, verbose = TRUE)
 MENS <- order_cells(MENS)
 
@@ -126,22 +126,6 @@ for(gene in genes_of_interest){
 }
 plot_genes_in_pseudotime(MENS[indices,])
   
-
-
-
-
-my_colors<- scales::hue_pal()(6)
-p <- plot_cells(cds, color_cells_by = "age", label_cell_groups = F)
-g <- plot_cells(cds[, pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = F)
-p1 <- plot_cells(cds[,pData(cds)$sample=="p10" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = F) + scale_color_manual(values = my_colors[1])
-p2 <- plot_cells(cds[,pData(cds)$sample=="p11" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[2])
-p3 <- plot_cells(cds[,pData(cds)$sample=="p20" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[3])
-p4 <- plot_cells(cds[,pData(cds)$sample=="p21" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[4])
-p5 <- plot_cells(cds[,pData(cds)$sample=="p60" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[5])
-p6 <- plot_cells(cds[,pData(cds)$sample=="p61" & pData(cds)$cell_type == "MENS"],cell_size = 1.5, color_cells_by = "age", label_cell_groups = ) + scale_color_manual(values = my_colors[6])
-
-
-
 
 #MENS <- learn_graph(MENS, learn_graph_control = list("minimal_branch_len" = 2))
 #MENS <- order_cells(MENS) #shiny app pop up
@@ -176,7 +160,7 @@ lrt <- doDifferentialExpression(cds_obj = MENS, method = "LRT",min_pct_cells_exp
                                 full = "~num_genes_expressed + mito_ratio + clusters",
                                 reduced = "~num_genes_expressed + mito_ratio")
 
-write.csv(lrt, file = "../results/MENS/de_genes_by_cluster.csv")
+write.csv(lrt, file = here("results/MENS/de_genes_by_cluster.csv"))
 lrt_filt <- lrt %>% filter(q_value < 0.05)
 print(qplot(lrt_filt$num_cells_expressed))
 #ensembl ids character vector
@@ -191,68 +175,12 @@ de_genes <- pull(lrt_filt, gene_id)
 
 ```
 ##There are 'r length(de_genes)' differentially expressed genes by MENs subcluster (p < 0.05)
-```{r defineSubclusters, eval =F}
-#For genes that are differentially expressed, what are there specificities to each cluster
-MENS_sub <- MENS[de_genes,]
-marker_test_res <- as.data.frame(top_markers(MENS_sub, group_cells_by="clusters", cores=8,verbose=T))
-
-DT::datatable(marker_test_res %>% dplyr::select(-c(gene_id, marker_score,pseudo_R2)), options = list(pageLength = 15))
-
-#Cluster 6 defined by proliferative markers
-#Clusters 3 and 6 have an order of magnitude more UMI per cell
 
 
-##what is actually driving these clusters to be different? Because they seem very similar.
-##Try removing mt and ribosomal proteins
-ribo.ind <- stringr::str_detect(fData(MENS)$gene_short_name,"^Rps") |
-  stringr::str_detect(fData(MENS)$gene_short_name,"^Rpl")
+```{r, eval = T}
 
-ribo.ind <- stringr::str_detect(fData(MENS)$gene_short_name,"^mt-") 
-
-#Select genes with expression in greater than 10 cells
-ribo.ind.filt <- which(fData(MENS)$num_cells_expressed[ribo.ind] > 10)
-MENS_sub <- MENS[ribo.ind.filt,]
-
-ribo_tx_counts <- data.frame("cluster" = NA,"norm" = NA ,"tx_count" = NA)
-for(cl in sort(unique(pData(MENS_sub)$clusters))){
-  raw <- sum(exprs(MENS_sub[,pData(MENS_sub)$clusters == cl]))
-  raw_avg <- raw/sum(pData(MENS_sub)$clusters == cl)
-
-  #use the size normalization factor computed for all genes, do not recompute here
-  size_norm <- sum(normalized_counts(MENS_sub[,pData(MENS_sub)$clusters == cl], norm_method = "size_only"))
-  size_norm_avg <- size_norm/sum(pData(MENS_sub)$clusters == cl)
-
-  df <- data.frame(cluster = cl, norm = c("raw","size_normed"), tx_count = c(raw_avg, size_norm_avg))
-  ribo_tx_counts <- rbind(ribo_tx_counts, df)
-}
-ribo_tx_counts <- ribo_tx_counts[-c(1),]
-ggplot(ribo_tx_counts, aes(cluster, tx_count)) + geom_col(aes(fill = norm), position = "dodge") + 
-  ggtitle("Average ribosomal transcripts per cell")
-
-
-MENS_sub <- estimate_size_factors(MENS_sub)
-MENS_sub <- preprocess_cds(MENS_sub, num_dim = 5, verbose=TRUE)
-MENS_sub <- reduce_dimension(MENS_sub,max_components=2,cores=4,verbose=TRUE)
-MENS_sub <- align_cds(MENS_sub, num_dim = 5, alignment_group = "batch + log10genes",alignment_k = 20,verbose=T)
-MENS_sub <- reduce_dimension(MENS_sub,max_components=2,cores=4,verbose=TRUE)
-MENS_sub <- cluster_cells(MENS_sub, k=20, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-04)
-plot_cells(MENS_sub)
-
-```
-
-
-
-```{r, eval = F}
-#Grab genes that are annotated to the cell cycle via GO
-cycle.anno <- AnnotationDbi::select(org.Mm.eg.db, keytype='GOALL', keys='GO:0007049',columns='ENSEMBL')[,'ENSEMBL']
-
-cycle.genes <- rownames(MENS)[fData(cds)$gene_id_trimmed %in% cycle.anno]
-                     
-MENS <- preprocess_cds(MENS, num_dim = 5, use_genes = cycle.genes, verbose=TRUE)
-MENS <- reduce_dimension(MENS,max_components=2,cores=4,verbose=TRUE, preprocess_method = "PCA")
-
-plot_cells(MENS, color_cells_by = "assigned_cluster")
-plot_cells(MENS, color_cells_by = "cycle_G2M_score")
+plot_cells(MENS, color_cells_by = "cluster")
+plot_cells(MENS, color_cells_by = "CCStage",label_cell_groups = F)
 ```
 
 
@@ -464,6 +392,6 @@ dev.off()
 
 
 ```{r}
-saveRDS(MENS, file = here(glue("6mo_MENS_{date}.rds")))
+saveRDS(MENS, file = here(glue("6mo_MENS.rds")))
 sessionInfo()
 ```

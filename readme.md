@@ -9,11 +9,14 @@ get_velo_files_mm10_10xv2.R
   index_build.sh
     kallisto_bus_pseudoalign.sh
       bustools.sh
+      
+./preprocessing/run_all.sh will run the 4 scripts above. Path to fastqs 
+  (in kallisto_bus_pseudoalign.sh) must be correct
 
 ## Processing from raw UMI counts, QC, dimensionality reduction
 ./scripts ./data ./results ./plots hold the relevant info
 Modular functions held in ./scripts/accessory_functions
-Scripts to generate figs and supp figs in .scripts/figures
+Scripts to generate figs and supp figs in ./scripts/figures
 
 Scripts run in the following order: 
 MES_6mo_LMMP_analysis.Rmd

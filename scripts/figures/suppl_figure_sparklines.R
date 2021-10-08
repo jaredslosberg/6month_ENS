@@ -5,17 +5,17 @@ library(scuttle)
 library(here)
 library(dplyr)
 
-source("/home/jared/ENS/Timecourse_ENS/scripts/accessory_functions/prep_sparklines_data.R")
+source(here("scripts/accessory_functions/prep_sparklines_data.R"))
 
 
-cds <- readRDS(here("./6month_LMMP.rds"))
+cds <- readRDS(here("6month_LMMP.rds"))
 cds <- scuttle::logNormCounts(cds)
 
 
-cell_types_to_keep <- c("Neuroglia","NENS","MENS")
+cell_types_to_keep <- c("Neuroglia","NENs","MENs")
 cds_sub <- cds[,pData(cds)$cell_type %in% cell_types_to_keep]
 pData(cds_sub)$cell_type <- pData(cds_sub)$cell_type %>%
-  recode("MENS" = "MENs","NENS" = "NC-derived cells", "Neuroglia" = "NC-derived cells")
+  recode("NENS" = "NC-neurons", "Neuroglia" = "NC-glia")
   
 
 #order cells by decreasing number of genes expressed
@@ -38,7 +38,7 @@ pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
   
 colnames(cds_sub) <- paste(pData(cds_sub)$barcode, pData(cds_sub)$sample, sep = ".")
 
-#choose color sets. Previously, neurons were salmon and MENS are green. 
+#TODO: update color sets. Previously, neurons were salmon and MENS are green. 
 labels <- pData(cds_sub)$group_title %>% unique %>% sort # Glia MENS NENs
 colors <- c("#66B200", "#00BFC4")
 
@@ -57,6 +57,6 @@ pl <- scrattch.vis::sample_bar_plot(matDF, annotDF,
 pl_titled <- pl +
   theme(plot.title = element_text(color = "black", size = 16, hjust = 0.5))
 
-pdf(here("./plots/supp_figures/selected_genes_sparklines.pdf"), width = 10, height = 6.5)
+pdf(here("plots/supp_figures/selected_genes_sparklines.pdf"), width = 10, height = 6.5)
   pl_titled
 dev.off()

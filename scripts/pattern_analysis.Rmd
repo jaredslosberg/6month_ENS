@@ -18,10 +18,12 @@ library(ComplexHeatmap)
 library(htmlwidgets)
 library(NNLM)
 library(here)
+library(purrr)
+library(glue)
 source(here("scripts/accessory_functions/pattern_plotting.R"))
 source(here("scripts/accessory_functions/monocle_mods.R"))
 source(here("scripts/accessory_functions/geneSetEnrichment.R"))
-source()
+source(here("scripts/accessory_functions/patternFeatureCorrelationHeatmap.R"))
 
 ```
 
@@ -33,7 +35,7 @@ set.seed(42)
 lmmp_6mo <- estimate_size_factors(lmmp_6mo)
 print(dim(lmmp_6mo))
 
-date <- "11-1"
+date <- "10-7"
 
 #Change this to something like cluster, cell type... whatever cell metadata to group by
 group_feature <- "clusters"
@@ -139,8 +141,12 @@ myplots <- lapply(paste0("cellPattern",condition_patterns),
                   FUN= plotPatternUsageByCondition,
                   cds = lmmp_6mo,
                   bin_by = "sample")
-print(do.call(ggarrange, myplots[1:length(condition_patterns)]))
-
+n_by <- 10
+seq_by <- seq(0, npattern, n_by)
+map(1:(length(seq_by)-1), function(i){
+  print(i)
+  print(do.call(ggarrange, myplots[(seq_by[i]+1):(seq_by[i+1])]))
+})
 
 
 ```
@@ -164,29 +170,55 @@ if(!do.existing.patterns){
 
 ## Run gene set enrichment analysis
 ```{r}
-#Run GSEA 
-geneWeights.df <- geneWeights.df %>% tibble::rownames_to_column(var = "gene_id")
 
-#TODO: SOMETHING REALLY WONKY HAPPENING HERE
-geneWeights.df.filt <- geneWeights.df[which(rownames(geneWeights.df) %in% fData(lmmp_6mo)$gene_short_name),]
-
-geneWeights.df.filt <- geneWeights.df.filt[fData(lmmp_6mo)$gene_short_name,]
-
-assertthat::assert_that(all(rownames(geneWeights.df.filt) == fData(lmmp_6mo)$gene_short_name))
-geneSetEnrichment(gene_weights = geneWeights.df,
-                  n_genes = 1000, n_patterns = 50, file_prefix = paste0("/home/jared/ENS/6mo_LMMP/results/GSEA/lmmp/lmmp_6mo_",date,"_"))
+if(!do.existing.patterns){
+  #Run GSEA 
+  geneWeights.df <- geneWeights.df %>% tibble::rownames_to_column(var = "gene_id")
+  
+    #putting gene names as rownames "cleaned" them, so genes starting with number or having "-" were changed. 
+  geneWeights.df.filt <- geneWeights.df
+  geneWeights.df.filt[,"gene_id"] <- rownames(lmmp_6mo)
+  
+  geneSetEnrichment(gene_weights = geneWeights.df.filt,
+                    n_genes = 1000,
+                    n_patterns = 50,
+                    file_prefix =
+                      paste0(here("results/GSEA/lmmp/lmmp_6mo_",date,"_"))
+                    )
+}
 ```
 
 ## Look at pattern correlations with metadata
 ```{r}
 #Run pattern correlations
-pData(lmmp_6mo)$cycle_phase[is.na(pData(lmmp_6mo)$cycle_phase)] <- "NA"
-features <- c("cell_type","cycle_phase", "sample")
+disc_features <- c("cell_type","CCStage", "sample")
+cont_features <- c("log10UMI","mito_ratio","tricyclePosition")
 
-heatmaps <- patternFeatureCorrelationHeatmap(lmmp_6mo, cellWeights.df = cellWeights.df, features = features)
+pData(lmmp_6mo)$CCStage[is.na(pData(lmmp_6mo)$CCStage)] <- "NA"
 
-heatmaps
+heatmaps <- patternFeatureCorrelationHeatmap(lmmp_6mo, cellWeights.df = cellWeights.df, discrete_features = disc_features, continuous_features = cont_features)
 
+hm_edit <- lapply(heatmaps[[1]], function(x){
+  x@column_names_param$gp$fontsize <- 8
+  x
+})
+
+if(!do.existing.patterns){
+  
+  pdf(here(glue("plots/NMF/lmmp/LMMP_{date}_pattern_feature_correlation.pdf")), width= 12)
+  hm_edit[[1]]@row_names_param$gp$fontsize <- 10
+  hm_edit
+  
+  
+  
+  Heatmap(heatmaps[[2]], column_title = "Correlation of pattern weights with continuous features",
+          name = "Pearson",
+          column_names_gp = gpar(fontsize = 8),
+          column_names_rot = 70,
+          row_names_gp = gpar(fontsize = 10))
+  
+  dev.off()
+}
 
 ```
 

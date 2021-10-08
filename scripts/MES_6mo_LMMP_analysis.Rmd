@@ -39,7 +39,7 @@ map(directs, function(dir){
 
 # Create monocle sc object from kallisto pipeline output
 # Generate knee plots and filter each sample by a minimum UMI count per cell
-```{r}
+```{r, cache = T}
 samples<-c("TH","TL") 
 
 
@@ -215,7 +215,7 @@ assay(cds, "logcounts") <- normalized_counts(cds, norm_method = "log")
 ```{r}
 set.seed(041)
 
-do.existing.embedding <- T
+do.existing.embedding <- F
 if(do.existing.embedding){
   pdat <- read.csv(here("results/lmmp_umap_clusters_man.csv"), row.names = 1)
   
@@ -350,26 +350,6 @@ p5
 
 ```
 
-
-```{r cellCycle, eval = F}
-
-##TODO: Update cell cycle to Charles' method
-
-mm.pairs <- readRDS(system.file("exdata", "mouse_cycle_markers.rds", package="scran"))
-
-exprs.mat <- exprs(cds)
-rownames(exprs.mat) <- fData(cds)$gene_id_trimmed
-cyc_results <- cyclone(exprs.mat, pairs = mm.pairs, verbose = T)
-
-pData(cds)$cycle_phase <- cyc_results[['phases']]
-
-pData(cds)$cycle_G1_score <- cyc_results[['normalized.scores']]$G1
-pData(cds)$cycle_S_score <- cyc_results[['normalized.scores']]$S
-pData(cds)$cycle_G2M_score <- cyc_results[['normalized.scores']]$G2M
-
-
-```
-
 # Gene expression plots for annotations
 ```{r, eval = T}
 genes_of_interest <- c("Smo","Fmo2","Aebp1","Cftr","Clic3","Slpi","Met","Cdh3","Calcb")
@@ -419,7 +399,7 @@ if(do.existing.embedding){
   pData(cds)$cell_type[pData(cds)$clusters == 9] <- "B Lymphocytes" #
   pData(cds)$cell_type[pData(cds)$clusters == 10] <-  "Pdgfra+ Fibroblasts" #
   pData(cds)$cell_type[pData(cds)$clusters == 11] <- "Penk+ Fibroblasts"   
-  #pData(cds)$cell_type[pData(cds)$clusters == 12] <- "Macrophage-A"
+  pData(cds)$cell_type[pData(cds)$clusters == 12] <- "Macrophage-G2M"
   pData(cds)$cell_type[pData(cds)$clusters == 13] <- "T cells"
   pData(cds)$cell_type[pData(cds)$clusters == 14] <- "NENs"
   pData(cds)$cell_type[pData(cds)$clusters == 15] <- "NK cells"

@@ -27,16 +27,16 @@ if(rownames(pData(lmmp_6mo)) == rownames(pattern_usages) && T){
 
 pData(lmmp_6mo)$cell_type_mod <- pData(lmmp_6mo) %>% as.data.frame %>% dplyr::pull(cell_type) %>%
   recode("Penk+ Fibroblasts" = "Fibroblast 1",
-         "Neuroglia" = "NC-Cells 1",
-         "NENS" = "NC-Cells 2",
-         "Macrophage-A" = "Unknown",
-         "Macrophage-B" = "Macrophage 1",
-         "Macrophage-C" = "Macrophage 2",
+         "Neuroglia" = "NC-glia",
+         "NENS" = "NC-neurons",
+         "Macrophage-A" = "Macrophage 1",
+         "Macrophage-B" = "Macrophage 2",
+         "Macrophage-G2M" = "Macrophage 3",
+         "Macrophage-C" = "Macrophage 4",
          "Pdgfra+ Fibroblasts" = "Fibroblast 2",
          "Smooth muscle cells" = "SMC",
-         "Vascular endothelium" = "V Endothelium",
-         "Interstitium" = "MENs",
-         "MENS" = "MENs")
+         "Smooth muscle cells B" = "SMC 2",
+         "Vascular endothelium" = "V Endothelium")
 
 #order by decreasing number of cells
 factor_order <- pData(lmmp_6mo)$cell_type_mod %>%
@@ -89,7 +89,7 @@ stopifnot(colnames(cell_mat) == cells_order)
 rownames(cell_mat) <- stringr::str_split_fixed(rownames(cell_mat), "cell", 2)[,2]
 
 
-pdf("/home/jared/ENS/6mo_LMMP/plots/supp_figures/NMF_heatmap.pdf", width = 10)
+pdf(here("plots/supp_figures/NMF_heatmap.pdf"), width = 10)
 
 pl <- ComplexHeatmap::Heatmap(cell_mat, name = "cellscore", col = colfun,
                         top_annotation = ha_cellgroup,

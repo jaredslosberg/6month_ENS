@@ -6,7 +6,7 @@ library(here)
 library(dplyr)
 library(stringr)
 
-source("/home/jared/ENS/Timecourse_ENS/scripts/accessory_functions/prep_sparklines_data.R")
+source(here("scripts/accessory_functions/prep_sparklines_data.R"))
 
 shorten_gene_lists <- function(gene_vec, n){
   gene_list <- list()
@@ -19,7 +19,7 @@ shorten_gene_lists <- function(gene_vec, n){
   return(gene_list)
 }     
 
-cds <- readRDS(here("./6month_LMMP.rds"))
+cds <- readRDS(here("6month_LMMP.rds"))
 assay(cds, "logcounts") <- normalized_counts(cds)
 
 cell_types_to_keep <- pData(cds)$cell_type %>% unique()
@@ -89,6 +89,6 @@ exprs_bar_plots <- purrr::map(genes_list, function(genes_vector_sub){
     theme(plot.title = element_text(color = "black", size = 16, hjust = 0.5))
 })
 
-pdf(here("./plots/supp_figures/neuronal_genes_sparklines.pdf"), width = 8, height = 16)
+pdf(here("plots/supp_figures/neuronal_genes_sparklines.pdf"), width = 8, height = 16)
   exprs_bar_plots
 dev.off()
