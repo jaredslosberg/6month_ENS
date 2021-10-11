@@ -14,8 +14,9 @@ cds <- scuttle::logNormCounts(cds)
 
 cell_types_to_keep <- c("Neuroglia","NENs","MENs")
 cds_sub <- cds[,pData(cds)$cell_type %in% cell_types_to_keep]
-pData(cds_sub)$cell_type <- pData(cds_sub)$cell_type %>%
-  recode("NENS" = "NC-neurons", "Neuroglia" = "NC-glia")
+pData(cds_sub)$cell_type_factor <- pData(cds_sub)$cell_type_factor %>%
+  recode("NENs" = "NC-neurons", "Neuroglia" = "NC-glia") %>%
+  droplevels()
   
 
 #order cells by decreasing number of genes expressed
@@ -31,17 +32,18 @@ cds_sub <- cds_sub[gene_idx,]
 
 
 pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
-  group_by(cell_type) %>%
-  mutate(group_title = paste0(cell_type, " (n = ", n() ,")")) %>%
+  group_by(cell_type_factor) %>%
+  mutate(group_title = paste0(cell_type_factor, " (n = ", n() ,")")) %>%
   ungroup() %>%
   DataFrame()
   
 colnames(cds_sub) <- paste(pData(cds_sub)$barcode, pData(cds_sub)$sample, sep = ".")
 
 #TODO: update color sets. Previously, neurons were salmon and MENS are green. 
-labels <- pData(cds_sub)$group_title %>% unique %>% sort # Glia MENS NENs
-colors <- c("#66B200", "#00BFC4")
-
+labels <- pData(cds_sub)$group_title %>% unique %>% sort # MENS glia NENs
+colors <- sapply(labels, function(lb){
+  pData(cds_sub)[pData(cds_sub)$group_title == lb, "ganglia_ct_color"] %>% unique
+})
 
 annotDF <- prep_annotation_matrix(cds_sub, facet_by = "group_title", colors = colors, labels = labels)
 matDF <- prep_expression_matrix(cds_sub, norm_method = "none",exprs_assay = "logcounts" , exprs_mat_gene_names = "gene_id", short_gene_names = "gene_short_name")

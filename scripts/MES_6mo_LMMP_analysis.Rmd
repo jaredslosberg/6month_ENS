@@ -24,6 +24,7 @@ library(scran)
 library(here)
 library(purrr)
 library(here)
+library(wesanderson)
 
 source(here("scripts/accessory_functions/doDifferentialExpression.R"))
 source(here("scripts/accessory_functions/assignCC.R"))
@@ -247,10 +248,10 @@ plot_cells(cds,genes=c("Sox10","Ret","Uchl1","Snap25"),cell_size=0.8)
 ```{r}
 #do not run if using existing embedding, which is loaded in block above
 if(!do.existing.embedding){
-  set.seed(502)
+  set.seed(501)
   
-  cds <- align_cds(cds, num_dim = 50, residual_model_formula_str = "~batch + num_genes_expressed",alignment_k = 20,verbose=T)
-  cds <- reduce_dimension(cds,max_components=2,cores=4,verbose=TRUE)
+  cds <- align_cds(cds, num_dim = 50,  alignment_group = "batch", residual_model_formula_str = "~ num_genes_expressed", alignment_k = 15,verbose=T, umap.fast_sgd = F)
+  cds <- reduce_dimension(cds,max_components=2,cores=1,verbose=TRUE, umap.n_neighbors = 15, umap.min_dist = 0.01)
   #cds <- order_cells(cds)
   
   plot_cells(cds,color_cells_by="sample",cell_size=0.5, label_cell_groups = F, alpha = .5)
@@ -263,7 +264,7 @@ if(!do.existing.embedding){
 ```{r}
 
 if(!do.existing.embedding){
-  cds <- cluster_cells(cds, k=15, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-05)
+  cds <- cluster_cells(cds, k=15, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=5e-05)
   pData(cds)$clusters<-clusters(cds)
   
 } 
@@ -276,9 +277,7 @@ plot_cells(cds, color_cells_by="sample") + ggtitle("Sample")
 p<-ggplot(as.data.frame(pData(cds))) +
   geom_bar(aes(x=clusters,fill=sample),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("sample representation by cluster")
 
-#pdf("~/Goff_Lab/Kulkarni_ENS/6month_LMMP/plots/Cluster_by_sample.pdf",width=9,height=6)
 plot_cells(cds) 
-#plot_cells(cds, color_cells_by = "sample", label_cell_groups = F) + scale_color_brewer()
 plot_cells(cds, color_cells_by = "log10UMI") 
 
 #dev.off()
@@ -388,29 +387,77 @@ if(do.existing.embedding){
   
   pData(cds)$cell_type<-"Unknown"
   
-  pData(cds)$cell_type[pData(cds)$clusters == 1] <- "MENs"
-  pData(cds)$cell_type[pData(cds)$clusters == 2] <- "Macrophage-A"
+  pData(cds)$cell_type[pData(cds)$clusters == 1] <-  "Macrophage-A"
+  pData(cds)$cell_type[pData(cds)$clusters == 2] <-"MENs"
   pData(cds)$cell_type[pData(cds)$clusters == 3] <- "Macrophage-B" 
   pData(cds)$cell_type[pData(cds)$clusters == 4] <- "Neuroglia"
   pData(cds)$cell_type[pData(cds)$clusters == 5] <- "Vascular endothelium"
   pData(cds)$cell_type[pData(cds)$clusters == 6] <- "Smooth muscle cells" #smtn, Acta2
   pData(cds)$cell_type[pData(cds)$clusters == 7] <- "RBC"
-  pData(cds)$cell_type[pData(cds)$clusters == 8] <- "RBC"
+  pData(cds)$cell_type[pData(cds)$clusters == 8] <- "Pdgfra+ Fibroblasts" #
   pData(cds)$cell_type[pData(cds)$clusters == 9] <- "B Lymphocytes" #
-  pData(cds)$cell_type[pData(cds)$clusters == 10] <-  "Pdgfra+ Fibroblasts" #
-  pData(cds)$cell_type[pData(cds)$clusters == 11] <- "Penk+ Fibroblasts"   
-  pData(cds)$cell_type[pData(cds)$clusters == 12] <- "Macrophage-G2M"
-  pData(cds)$cell_type[pData(cds)$clusters == 13] <- "T cells"
-  pData(cds)$cell_type[pData(cds)$clusters == 14] <- "NENs"
+  pData(cds)$cell_type[pData(cds)$clusters == 10] <- "Penk+ Fibroblasts"   
+  pData(cds)$cell_type[pData(cds)$clusters == 11] <- "T cells"
+  pData(cds)$cell_type[pData(cds)$clusters == 12] <-  "NENs"
+  pData(cds)$cell_type[pData(cds)$clusters == 13] <- "NK cells"
+  pData(cds)$cell_type[pData(cds)$clusters == 14] <- "Macrophage-C"
   pData(cds)$cell_type[pData(cds)$clusters == 15] <- "NK cells"
-  pData(cds)$cell_type[pData(cds)$clusters == 16] <- "NK cells"
+  pData(cds)$cell_type[pData(cds)$clusters == 16] <- "Macrophage-C"  
   pData(cds)$cell_type[pData(cds)$clusters == 17] <- "Smooth muscle cells B"
-  pData(cds)$cell_type[pData(cds)$clusters == 18] <- "Interstitium"
-  pData(cds)$cell_type[pData(cds)$clusters == 19] <- "Macrophage-C" 
+  pData(cds)$cell_type[pData(cds)$clusters == 18] <- "Macrophage-B" 
+  pData(cds)$cell_type[pData(cds)$clusters == 19] <- "Interstitium"
   pData(cds)$cell_type[pData(cds)$clusters == 20] <- "NENs" 
-  
+  pData(cds)$cell_type[pData(cds)$clusters == 21] <- "Macrophage-C"  
+
 }
 ```
+
+```{r}
+#get colors for cell types based on numerical cluster order (not alphabetical)
+
+colors <- pData(cds)$cell_type %>%
+  unique() %>%
+  length() %>%
+  hue_pal()(.)
+
+color_df <- data.frame(cell_type = unique(pData(cds)$cell_type), ct_colors = colors)
+
+cluster_ct_colors <- pData(cds) %>% 
+  as.data.frame() %>%
+  group_by(clusters) %>% 
+  summarize(samp = n(),
+            cell_type = unique(cell_type)) %>%
+  inner_join(., color_df, by = "cell_type")
+
+pData(cds)$cell_type_factor <- factor(pData(cds)$cell_type, levels = unique(cluster_ct_colors$cell_type))
+
+pData(cds)$cell_type_factor_color <- sapply(pData(cds)$cell_type, function(ct){
+  color_df[ct == color_df$cell_type, "ct_colors"]
+})
+
+```
+
+```{r}
+pData(cds)$ganglia_ct<-NA
+
+pData(cds)$ganglia_ct[pData(cds)$cell_type == "MENs"] <-  "MENs"
+pData(cds)$ganglia_ct[pData(cds)$cell_type == "NENs"] <-"NENs"
+pData(cds)$ganglia_ct[pData(cds)$cell_type == "Neuroglia"] <- "Neuroglia"
+
+pData(cds)$ganglia_ct <- factor(pData(cds)$ganglia_ct, levels = c("MENs", "Neuroglia", "NENs", NA))
+
+ganglia_colors <- rev(wes_palette("GrandBudapest1", n = 3))
+names(ganglia_colors) <- c("MENs", "Neuroglia", "NENs")
+
+pData(cds)$ganglia_ct_color <- sapply(pData(cds)$ganglia_ct, function(ct){
+  ganglia_colors[ct]
+})
+
+
+
+
+```
+
 
 ```{r do_diff_expression}
 lrt <- doDifferentialExpression(cds_obj = cds, method = "LRT",min_pct_cells_exprs =  .02, 
@@ -430,6 +477,7 @@ de_genes <- pull(lrt_filt, gene_id)
 saveRDS(cds, file = here("6month_LMMP.rds"))
 write.csv(colnames(cds)[pData(cds)$cell_type == "MENS"], here("results/MENS/6mo_mens_names.txt"),quote = F, row.names = F)
 ```
+
 
 ```{r}
 if(!file.exists(here("results/lmmp_umap_clusters_man.csv"))){

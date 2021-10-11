@@ -26,16 +26,15 @@ if(rownames(pData(lmmp_6mo)) == rownames(pattern_usages) && T){
 }
 
 pData(lmmp_6mo)$cell_type_mod <- pData(lmmp_6mo) %>% as.data.frame %>% dplyr::pull(cell_type) %>%
-  recode("Penk+ Fibroblasts" = "Fibroblast 1",
+  recode("Penk+ Fibroblasts" = "Fibroblast A",
          "Neuroglia" = "NC-glia",
-         "NENS" = "NC-neurons",
-         "Macrophage-A" = "Macrophage 1",
-         "Macrophage-B" = "Macrophage 2",
-         "Macrophage-G2M" = "Macrophage 3",
-         "Macrophage-C" = "Macrophage 4",
-         "Pdgfra+ Fibroblasts" = "Fibroblast 2",
+         "NENs" = "NC-neurons",
+         "Macrophage-A" = "Macrophage-A",
+         "Macrophage-B" = "Macrophage-B",
+         "Macrophage-C" = "Macrophage-C",
+         "Pdgfra+ Fibroblasts" = "Fibroblast B",
          "Smooth muscle cells" = "SMC",
-         "Smooth muscle cells B" = "SMC 2",
+         "Smooth muscle cells B" = "SMC B",
          "Vascular endothelium" = "V Endothelium")
 
 #order by decreasing number of cells

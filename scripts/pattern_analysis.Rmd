@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r }
+```{r, message = F, results="hide"}
 library(monocle3)
 library(ggplot2)
 library(ggpubr)

@@ -26,7 +26,7 @@ cell_types_to_keep <- pData(cds)$cell_type %>% unique()
 
 cds_sub <- cds[,pData(cds)$cell_type %in% cell_types_to_keep]
 pData(cds_sub)$cell_type <- pData(cds_sub)$cell_type %>%
-  recode("MENS" = "MENs","NENS" = "NC-derived cells", "Neuroglia" = "NC-derived cells")
+  recode("MENS" = "MENs","NENS" = "NC-neurons", "Neuroglia" = "NC-glia")
   
 
 #order cells by decreasing number of genes expressed
@@ -51,16 +51,26 @@ cds_sub <- cds_sub[gene_idx,]
 
 pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
   group_by(cell_type) %>%
-  mutate(group_title = paste0(cell_type, " (n = ", n() ,")")) %>%
+  mutate(group_title = paste0(cell_type_factor, " (n = ", n() ,")")) %>%
   ungroup() %>%
   DataFrame()
   
 colnames(cds_sub) <- paste(pData(cds_sub)$barcode, pData(cds_sub)$sample, sep = ".")
 
-#choose color sets. Previously, neurons were salmon and MENS are green. 
-labels <- pData(cds_sub)$group_title %>% unique %>% sort # Glia MENS NENs
+
+labels <- pData(cds_sub)[,c("group_title", "cell_type_factor")] %>%
+  as.data.frame() %>%
+  arrange(cell_type_factor) %>%
+  pull("group_title") %>%
+  unique
+
 colors <- scales::hue_pal()(length(labels))
 
+
+# colors <- sapply(labels, function(lb){
+#   scales::hue_pal()(length(labels))
+#   pData(cds_sub)[pData(cds_sub)$group_title == lb, "cell_type_factor_color"] %>% unique
+# })
 
 annotDF <- prep_annotation_matrix(cds_sub, facet_by = "group_title", colors = colors, labels = labels)
 
@@ -80,6 +90,7 @@ exprs_bar_plots <- purrr::map(genes_list, function(genes_vector_sub){
   pl <- scrattch.vis::sample_bar_plot(matDF, annotDF,
                                       genes = genes_vector_sub,
                                       grouping = "primary_type",
+                                      group_order = labels,
                                       bg_color ="#f7f7f7",
                                       label_height = 17,
                                       font_size = 12,

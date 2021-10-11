@@ -5,7 +5,7 @@ mkdir -p data/ plots/NMF/ results/ results/GSEA/lmmp results/GSEA/mens results/N
 
 #Run kallisto bustools workflow
 #Requires building kallistobus.yml
-bash ./preprocessing/scripts/run_all.sh
+#bash ./preprocessing/scripts/run_all.sh
 
 R -e "rmarkdown::render('scripts/MES_6mo_LMMP_analysis.Rmd', output_format = 'html_document')"
 
@@ -22,12 +22,12 @@ R -e "rmarkdown::render('scripts/6mo_MENS_followup.Rmd', output_format = 'html_d
 
 #Requires building scvelocity.yml
 conda activate scVelocity
-jupyter nbconvert --to notebook --execute ./velocity/scripts/velocity.ipynb
+jupyter nbconvert --clear-output --to notebook --execute ./velocity/scripts/velocity.ipynb
 
 
 #Figures and supplemental figures
-Rscript --vanilla atlas_projections.R
-Rscript --vanilla cluster_expression_violin.R
-Rscript --vanilla lmmp_NMF_heatmap.R
-Rscript --vanilla neuronal_markers_sparklines.R
-Rscript --vanilla suppl_figure_sparklines.R
+# Rscript --vanilla cluster_expression_violin.R
+# Rscript --vanilla lmmp_NMF_heatmap.R
+# Rscript --vanilla neuronal_markers_sparklines.R
+# Rscript --vanilla suppl_figure_sparklines.R
+# Rscript --vanilla atlas_projections.R

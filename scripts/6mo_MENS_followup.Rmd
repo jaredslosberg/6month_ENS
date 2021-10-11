@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```
 
-```{r initialize, echo = F, message = F}
+```{r initialize, echo = F, message = F, results = 'hide'}
 library(monocle3)
 library(xtable)
 library(scales)
@@ -33,7 +33,7 @@ source(here("scripts/accessory_functions/doDifferentialExpression.R"))
 source(here("scripts/accessory_functions/pattern_plotting.R"))
 source(here("scripts/accessory_functions/geneSetEnrichment.R"))
 source(here("scripts/accessory_functions/cluster_genes_mod.R"))
-source(here("scripts/accessory_functions/transferAnnotations.R"))
+source(here("scripts/accessory_functions/patternFeatureCorrelationHeatmap.R"))
 
 set.seed(138)
 ```
@@ -98,23 +98,20 @@ htmlwidgets::saveWidget(dt, file = here("results/MENS/MENS_subset_cluster_marker
 
 plot_cells(MENS, group_label_size = 3)
 plot_cells(MENS, color_cells_by = "log10UMI")
-plot_cells(MENS, color_cells_by = "cycle_phase", cell_size = 0.6, label_cell_groups = F)
+plot_cells(MENS, color_cells_by = "CCStage", cell_size = 0.6, label_cell_groups = F)
 
 plot_cells_mod(MENS, color_cells_by="sample", group_cells_by="cluster", label_cell_groups = F) +
   ggtitle("Sample") + facet_wrap(vars(sample))
 
 
-p<-ggplot(as.data.frame(pData(MENS))) +
-  geom_bar(aes(x=clusters,fill=sample),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("sample representation by cluster")
 p1<-ggplot(as.data.frame(pData(MENS))) +
   geom_bar(aes(x=clusters,fill=batch),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("batch representation by cluster")
 
-p
 p1
 ```
 
 
-```{r, pseudotime, eval = T}
+```{r, pseudotime, eval = interactive()}
 MENS <- learn_graph(MENS, verbose = TRUE)
 MENS <- order_cells(MENS)
 
@@ -147,9 +144,8 @@ res <- res %>% arrange(q_value)
 res <- res[res$num_cells_expressed > 20,]
 top_ids <- res$gene_short_name[1:20]
 
+plot_cells(MENS)
 
-#p <- plot_genes_in_pseudotime(MENS[fData(MENS)$gene_short_name %in% top_ids[1:20],], color_cells_by = "pseudotime", min_expr = 0.5, panel_order = top_ids[1:20])
-#ggsave("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/MENS_followup/trajectory_genes_pseudotime.pdf", height = 40)
 
 
 ```
@@ -165,12 +161,6 @@ lrt_filt <- lrt %>% filter(q_value < 0.05)
 print(qplot(lrt_filt$num_cells_expressed))
 #ensembl ids character vector
 de_genes <- pull(lrt_filt, gene_id)
-
-# graph_test_res <- graph_test(MENS, neighbor_graph = "knn", k = 15, verbose = T)
-# pData(cds)$test_group <- NULL
-# pData(cds)$test_group[pData(cds)$assigned_cluster == 3] <- 3
-# pData(cds)$test_group[pData(cds)$assigned_cluster == 2] <- 2
-# plot_cells(cds, color_cells_by = "test_group")
 
 
 ```
@@ -293,53 +283,73 @@ write.csv(geneWeights.df, here(glue("results/NMF/MENS/MENS_{date}_log_cellsize_p
 #### One hot encoding method.
 ### For each pattern, compute correlation between two vectors. One is continuous (cell pattern weight)
 ### and one is binary (yes/no is that cell in that group)
-pData(MENS)$cycle_phase[is.na(pData(MENS)$cycle_phase)] <- "NA"
+pData(MENS)$CCStage[is.na(pData(MENS)$CCStage)] <- "NA"
 
-#categorical features, one-hot encoding
-features <- c("clusters","cycle_phase")
-heatmap_figure_list <- lapply(features, function(feature){
-  feature_levels <- sort(unique(pData(MENS)[,feature]))
-  
-  corr_mat <- matrix(nrow = length(feature_levels), ncol = npattern)
-  
-  
-  #loop over each pattern
-  for(i in 1:npattern){
-    cell_weights <- cellWeights.df[,paste0("cellPattern",i)]
-    names(cell_weights) <- rownames(cellWeights.df)
-    #re-initialize empty correlation vector
-    corr_vec <- numeric()
-    #loop over each level within the categorical variable
-    for(level in feature_levels){
-  
-      values <- pData(MENS)[,feature]
-      one_hot_values <- (values == level)
-      names(one_hot_values) <- colnames(MENS)
-      #Make sure our cells are in the same order
-      assertthat::assert_that(sum(names(one_hot_values) == names(cell_weights)) == length(one_hot_values))
-      
-      #calculate correlation between two vectors
-      level_cor <- cor(cell_weights, one_hot_values)
-      #corr_df is a one-dimensional vector, eg the correlations between all features for a single pattern
-      corr_vec <- c(corr_vec, level_cor)
-    }
-    #Now we have a n_feature_levels x n_pattern matrix with pairwise correlations
-    corr_mat[,i] <- corr_vec
-  }
-  rownames(corr_mat) <- feature_levels
-  colnames(corr_mat) <- paste0("cellPattern",1:npattern)
-  
-  heatmap_figure <- ComplexHeatmap::Heatmap(corr_mat, name = "pearson_corr", 
-                                            column_title = paste0("correlation between pattern and ",feature, " annotation"))
-  return(heatmap_figure)
+#Run pattern correlations
+disc_features <- c("clusters","CCStage", "batch")
+cont_features <- c("log10UMI","mito_ratio","tricyclePosition")
+
+heatmaps <- patternFeatureCorrelationHeatmap(MENS, cellWeights.df = cellWeights.df, discrete_features = disc_features, continuous_features = cont_features)
+
+hm_edit <- lapply(heatmaps[[1]], function(x){
+  x@column_names_param$gp$fontsize <- 8
+  x
 })
 
 
-pdf(here(glue("plots/NMF/MENS/MENS_{date}_pattern_11-25_categorical_feature_correlation.pdf")), height= 8, width = 8)
-print(heatmap_figure_list)
+
+pdf(here(glue("plots/NMF/MENS/MENS_{date}_pattern_feature_correlation.pdf")), width= 12)
+
+hm_edit[[1]]@row_names_param$gp$fontsize <- 10
+hm_edit
+
+Heatmap(heatmaps[[2]], column_title = "Correlation of pattern weights with continuous features",
+        name = "Pearson",
+        column_names_gp = gpar(fontsize = 8),
+        column_names_rot = 70,
+        row_names_gp = gpar(fontsize = 10))
+
 dev.off()
 
 
+# #categorical features, one-hot encoding
+# features <- c("clusters","CCStage")
+# heatmap_figure_list <- lapply(features, function(feature){
+#   feature_levels <- sort(unique(pData(MENS)[,feature]))
+#   
+#   corr_mat <- matrix(nrow = length(feature_levels), ncol = npattern)
+#   
+#   
+#   #loop over each pattern
+#   for(i in 1:npattern){
+#     cell_weights <- cellWeights.df[,paste0("cellPattern",i)]
+#     names(cell_weights) <- rownames(cellWeights.df)
+#     #re-initialize empty correlation vector
+#     corr_vec <- numeric()
+#     #loop over each level within the categorical variable
+#     for(level in feature_levels){
+#   
+#       values <- pData(MENS)[,feature]
+#       one_hot_values <- (values == level)
+#       names(one_hot_values) <- colnames(MENS)
+#       #Make sure our cells are in the same order
+#       assertthat::assert_that(sum(names(one_hot_values) == names(cell_weights)) == length(one_hot_values))
+#       
+#       #calculate correlation between two vectors
+#       level_cor <- cor(cell_weights, one_hot_values)
+#       #corr_df is a one-dimensional vector, eg the correlations between all features for a single pattern
+#       corr_vec <- c(corr_vec, level_cor)
+#     }
+#     #Now we have a n_feature_levels x n_pattern matrix with pairwise correlations
+#     corr_mat[,i] <- corr_vec
+#   }
+#   rownames(corr_mat) <- feature_levels
+#   colnames(corr_mat) <- paste0("cellPattern",1:npattern)
+#   
+#   heatmap_figure <- ComplexHeatmap::Heatmap(corr_mat, name = "pearson_corr", 
+#                                             column_title = paste0("correlation between pattern and ",feature, " annotation"))
+#   return(heatmap_figure)
+# })
 
 
 ```
@@ -392,6 +402,9 @@ dev.off()
 
 
 ```{r}
+#Remove existing pattern weights
+pData(MENS) <- dplyr::select(as.data.frame(pData(MENS)), !starts_with("cellPattern")) %>% DataFrame()
+
 saveRDS(MENS, file = here(glue("6mo_MENS.rds")))
 sessionInfo()
 ```

@@ -2,6 +2,7 @@ library(SingleCellExperiment)
 library(monocle3)
 library(here)
 library(dplyr)
+library(ggplot2)
 
 cds <- readRDS(here("6month_LMMP.rds"))
 
@@ -21,9 +22,11 @@ pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
 #
 genes <- c("Calcb","Aebp1","Cdh3","Cftr","Clic3","Fmo2","Ntf3","Slpi","Smo","Myl7","Met","Il18","Slc17a9","Ret","Nos1","Sox10")
   
+
 vl <- plot_genes_violin(cds_sub[fData(cds)$gene_short_name %in% genes,], group_cells_by = "group_title") + 
   xlab("") + 
-  theme(axis.text.x = element_text(size = 14))
+  theme(axis.text.x = element_text(size = 14)) + 
+  scale_fill_manual(values = rev(wesanderson::wes_palette("GrandBudapest1", n =3)))
 
 pdf(here("plots/supp_figures/violin_expression.pdf"), width = 8, height = 16) 
   vl
