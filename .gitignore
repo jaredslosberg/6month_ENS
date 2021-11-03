@@ -5,33 +5,36 @@
 #data
 mens_6mo_counts.rds
 6month_LMMP.rds
-6mo_MENS_11-25.rds
+6mo_MENS*.rds
+6mo_MENS*.h5ad
 6moLMMP*
 6mo_LMMP*
 results/
-preprocessing/bus_output/
+preprocessing/
+#This isn't working
+!preprocessing/scripts
+!preprocessing/bustools_required_files_10xv2_mm/737K-august-2016.txt
+
+preprocessing_old/
 plots/
+
+scripts/*_cache
+scripts/*_files
+
+
+
+projections/
+
+
+
+
+#project specific data
+
 tabula_muris/*
 !tabula_muris/scripts/*.R
 teichman_gut_atlas/*
 !teichman_gut_atlas/scripts/*.Rmd
 vanderbilt/
-!vanderbilt/scripts
-
-preprocessing/
-
-#This isn't working
-!preprocessing/scripts
-!preprocessing/bustools_required_files_10xv2_mm/737K-august-2016.txt
-
-projections/
-
-
-!teichman_gut_atlas/scripts
-
-
-#project specific data
-disease_enrichment
 
 ligand_receptors
 
@@ -42,3 +45,11 @@ mens/MENS_followup_files/*
 
 velocity/plots
 velocity/results
+
+DRS/plots
+DRS/data
+DRS/out
+
+preprocessing_old/
+
+

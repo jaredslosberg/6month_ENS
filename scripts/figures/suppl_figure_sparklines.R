@@ -39,7 +39,6 @@ pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
   
 colnames(cds_sub) <- paste(pData(cds_sub)$barcode, pData(cds_sub)$sample, sep = ".")
 
-#TODO: update color sets. Previously, neurons were salmon and MENS are green. 
 labels <- pData(cds_sub)$group_title %>% unique %>% sort # MENS glia NENs
 colors <- sapply(labels, function(lb){
   pData(cds_sub)[pData(cds_sub)$group_title == lb, "ganglia_ct_color"] %>% unique
