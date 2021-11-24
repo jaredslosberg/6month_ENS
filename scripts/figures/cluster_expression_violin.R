@@ -26,7 +26,7 @@ pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
   
 #
 genes <- c("Calcb","Aebp1","Cdh3","Cftr","Clic3","Fmo2","Ntf3","Slpi","Smo","Myl7","Met","Il18","Slc17a9","Ret","Nos1","Sox10", 
-           "Stmn2","Elavl1","Elavl2","Elavl3","Elavl4","Ncam1","Stx1a","Stx1b","Vsnl1","Hand2", "Pde10a")
+           "Stmn2","Elavl1","Elavl2","Elavl3","Elavl4","Ncam1","Stx3","Vsnl1","Hand2", "Pde10a")
 genes_list <- shorten_gene_lists(genes, 8)  
 
 violins <- map(genes_list, ~.gns)

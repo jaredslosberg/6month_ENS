@@ -12,6 +12,6 @@
 ## No idea how long or how much memory for 35k cells x 30k genes, 74 gene sets
 ##---------------------------------------------------------------------
 
-source activate scRNA
+cd /data/users/jared/ENS/6mo_LMMP/DRS
 
-jupyter nbconvert --clear-output --execute --to notebook 74_traits_DRS.ipynb
+bash run_all_DRS.sh

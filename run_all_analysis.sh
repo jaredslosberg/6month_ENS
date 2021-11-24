@@ -31,3 +31,5 @@ jupyter nbconvert --clear-output --to notebook --execute ./velocity/scripts/velo
 # Rscript --vanilla neuronal_markers_sparklines.R
 # Rscript --vanilla suppl_figure_sparklines.R
 # Rscript --vanilla atlas_projections.R
+
+#TODO: run external datasets e.g. teichman gut atlas

@@ -1,6 +1,6 @@
 ---
 title: "Gut atlas MENS projection"
-output: html_notebook
+output: html_document
 ---
 
 ```{r check_interactive}
@@ -14,7 +14,7 @@ if(interactive()){
 ```
 
 
-```{r load, message = F, results= 'hide'}
+```{r load, message = F, results= 'hide', warning=F}
 library(projectR)
 library(ggplot2)
 library(dplyr)
@@ -157,7 +157,7 @@ pattern_wt_plots[1:5]
 
 ```{r, eval = F}
 #calculate UMAP based on projected pattern weights instead of PCA
-do.reembed <- 1
+do.reembed <- 0
 if (do.reembed){
   features_of_interest <- transferred_cell_wts[,paste0("cellPattern",select_patterns)]
   umap_res <- uwot::umap(as.matrix(features_of_interest),
@@ -239,7 +239,7 @@ pData(cds) <- pData(cds) %>%
 
 ```
 
-```{r}
+```{r, eval =F}
 transferred_cell_weights_filt <- transferred_cell_weights %>%
   select(all_of(paste0("cellPattern", 1))) %>% t()
 

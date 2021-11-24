@@ -1,0 +1,189 @@
+---
+title: "scDRS followup"
+output: html_notebook
+---
+
+```{r, message=FALSE}
+library(monocle3)
+library(ggplot2)
+library(tidyverse)
+library(here)
+library(ComplexHeatmap)
+library(circlize)
+library(glue)
+library(ggpointdensity)
+
+if(!dir.exists(here("DRS/plots"))) dir.create(here("DRS/plots"))
+```
+
+```{r}
+lmmp <- readRDS(here("6month_LMMP.rds"))
+
+```
+
+```{r}
+drs_dir <- here("DRS")
+
+n_jobs <- 19
+
+traits_gene_sets <- map_df(1:n_jobs, function(i){
+  
+  traits_gene_sets_fn <- glue("/mnt/morbo/Data/Users/jslosberg/ebi_gwas/gwas_subsets/gwas_gene_sets_sub{i}.tsv")
+  
+  traits_gs <- read_tsv(traits_gene_sets_fn)
+  
+})
+
+
+traits <- traits_gene_sets %>% pull("TRAIT")
+
+#because some files don't exist yet
+test <- map_chr(traits, function(trt){ 
+  if(file.exists(here(glue("DRS/ebi_out/{trt}.full_score.gz")))){
+    trt
+  }else NA
+})
+
+#because I used a semi-colon in trait names, and monocle replaces that with a .
+#TODO: rerun with "-" instead of ":"
+traits <- test[!is.na(test)] 
+
+traits_mon <- traits %>% str_replace(., ":", ".")
+
+
+
+
+```
+
+
+
+Now read in the scores for each cell
+```{r}
+#Returns a subset of cells because there some filtering step on genes expressed (according to flag passed to compute_score)
+scores <- map(traits, function(trt){
+  
+  df <- data.table::fread(here(glue("DRS/ebi_out/{trt}.full_score.gz")))
+  colnames(df)[colnames(df) == "V1"] <- "index"
+  
+  return(df)
+}) %>% setNames(traits)
+
+str(scores[[1]][,1:15])
+
+#long format
+scores_df <- scores %>%
+  bind_rows(.id = "phenotype")
+
+#pData features to include
+feats <- c("log10UMI", "cell_type", "sample")
+scores_df <- scores_df %>% left_join(.,
+                                     pData(lmmp)[,feats] %>%
+                                       as.data.frame() %>%
+                                       tibble::rownames_to_column(var = "index")
+                                     )
+
+
+
+```
+
+```{r}
+#for pData
+scores_df_sub <- map(traits, function(trt){
+  df <- data.frame(scores[[trt]][,"norm_score"]) 
+  colnames(df) <- trt
+  df
+  
+}) %>%
+  bind_cols %>%
+  mutate(index = scores[[1]]$index)
+
+pData(lmmp) <- pData(lmmp) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column(var = "index") %>%
+  left_join(., scores_df_sub, by = "index") %>%
+  tibble::column_to_rownames(var = "index") %>%
+  DataFrame()
+
+plot_cells(lmmp, color_cells_by = traits_mon[[1]])
+```
+
+```{r}
+
+ggplot(filter(scores_df, phenotype == traits[[1]]), aes(x = log10UMI, y = norm_score)) + geom_point() + ggpointdensity::geom_pointdensity()
+ggplot(filter(scores_df, phenotype == traits[[1]]), aes(x = log10UMI, y = pval)) + geom_point() + ggpointdensity::geom_pointdensity()
+
+ggplot(filter(scores_df, phenotype == traits[[1]]), aes(x = log10UMI, y = nlog10_pval)) + geom_point() + ggpointdensity::geom_pointdensity()
+
+
+
+```
+
+```{r}
+all_boxplots <- ggplot(scores_df) +
+  geom_boxplot(aes(x = cell_type, y = norm_score, color = cell_type)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  facet_wrap(~phenotype, ncol = 2)
+
+pdf(here("DRS/plots/ebi_norm_score_boxplots.pdf"), width = 10, height = 220)
+  all_boxplots
+dev.off()
+
+```
+
+**Heatmap for average normalized DRS by cell type**
+
+```{r, out.width = "10%" }
+mean_score_ct <- map(traits, function(trt){
+  df<- scores_df %>% filter(phenotype == trt) %>% group_by(cell_type) %>% summarize(mean_norm_score = mean(norm_score)) 
+  colnames(df) <- c("cell_type", trt)
+  
+  return(df)
+}) %>% reduce(left_join, by = "cell_type") %>% tibble::column_to_rownames(var = "cell_type") %>% as.data.frame()
+
+p <- ComplexHeatmap::Heatmap(t(as.matrix(mean_score_ct)), 
+                             heatmap_legend_param = list(direction = "horizontal"),
+                             name = "norm_DRS",
+                             show_row_names = FALSE)
+                             #row_names_max_width = unit(45, "cm"))
+
+pdf(here("DRS/plots/ebi_norm_score_heatmap_celltype.pdf"), width = 10, height = 15)
+  draw(p, heatmap_legend_side = "top")
+dev.off()
+
+p <- ComplexHeatmap::Heatmap(t(as.matrix(mean_score_ct)), 
+                             heatmap_legend_param = list(direction = "horizontal"),
+                             name = "norm_DRS")
+                             #row_names_max_width = unit(45, "cm"))
+
+pdf(here("DRS/plots/ebi_norm_score_heatmap_celltype_long.pdf"), width = 40, height = 200)
+  draw(p, heatmap_legend_side = "top")
+dev.off()
+```
+
+p-values for a few traits
+
+```{r}
+pheno <- traits[1:2]
+
+p1 <- ggplot(filter(scores_df, phenotype %in% pheno)) +
+  geom_violin(aes(x = cell_type, y = nlog10_pval, color = cell_type)) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  facet_wrap(~phenotype, ncol = 1) +
+  geom_hline(yintercept = -log10(0.05), color = "red", linetype = "dashed")
+
+p2 <- ggplot(filter(scores_df, phenotype %in% pheno)) +
+  geom_violin(aes(x = cell_type, y = norm_score, color = cell_type)) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  facet_wrap(~phenotype, ncol = 1) +
+  geom_hline(yintercept = -log10(0.05), color = "red", linetype = "dashed")
+
+p1
+p2
+
+pdf(here("DRS/plots/ebi_pvalue_violin_select_phenotypes.pdf"), width = 8, height = 12)
+  ggpubr::ggarrange(p1,p2)
+dev.off()
+
+```
