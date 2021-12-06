@@ -1,3 +1,5 @@
+#Sparklines expression of cdh3, clic3, ntf3, snap25 in mens/nens/glia
+
 library(SingleCellExperiment)
 library(monocle3)
 library(scrattch.vis)
@@ -9,7 +11,6 @@ source(here("scripts/accessory_functions/prep_sparklines_data.R"))
 
 
 cds <- readRDS(here("6month_LMMP.rds"))
-cds <- scuttle::logNormCounts(cds)
 
 
 cell_types_to_keep <- c("Neuroglia","NENs","MENs")
@@ -26,10 +27,7 @@ cds_sub <- cds_sub[,idx]
 #reformats cds so genes are in this order
 genes <- c("Cdh3","Clic3","Ntf3","Snap25")
 gene_idx <- sapply(genes, function(gene){which(fData(cds_sub)$gene_short_name == gene)})
-
 cds_sub <- cds_sub[gene_idx,]
-
-
 
 pData(cds_sub) <- pData(cds_sub) %>% as.data.frame() %>%
   group_by(cell_type_factor) %>%

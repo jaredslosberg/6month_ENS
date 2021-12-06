@@ -1,6 +1,6 @@
 ---
 title: "Make h5ad for scVelo"
-output: html_notebook
+output: html_document
 ---
 
 ```{r, message=F}
@@ -15,13 +15,15 @@ library(Matrix)
 Load existing monocle3 object, and read in spliced counts for matched cells
 
 ```{r}
-cds <- readRDS(here("6mo_MENS_11-25.rds"))
+cds <- readRDS(here("6mo_MENS.rds"))
 
-plot_cells(cds, color_cells_by = "cycle_phase") #not expecting much for velocity based on no cycling cells
+plot_cells(cds, color_cells_by = "tricyclePosition") #not expecting much for velocity based on no cycling cells
 
 ```
 
 ```{r}
+cds_genes <- rownames(cds)
+
 spliced_status <- c("s","u") #names of files from kallisto
 spliced_status_full <- c("spliced","unspliced")
 samples <- c("TH","TL")
@@ -43,6 +45,8 @@ exprs_mat_list <- pmap(list(spliced_status, spliced_status_full), function(spl, 
     genes <- read_delim(glue("{kall_path}/{spl}.genes.txt"), delim = "\n", col_names = F) %>%
       pull(1)
     
+    genes_trimmed <- genes %>% str_split_fixed(., "\\.", 2) %>% .[,1]
+    
     #read in cells and append .{sample} so they match cell data set
     cells <- read_delim(glue("{kall_path}/{spl}.barcodes.txt"), delim = "\n", col_names = F) %>%
       pull(1) %>% 
@@ -52,7 +56,7 @@ exprs_mat_list <- pmap(list(spliced_status, spliced_status_full), function(spl, 
     cells_filt <- cells[cells %in% colnames(cds)]
     
     colnames(mtx) <- cells
-    rownames(mtx) <- genes
+    rownames(mtx) <- genes_trimmed
     
     mtx_filt <- mtx[,cells_filt]
     
@@ -60,9 +64,13 @@ exprs_mat_list <- pmap(list(spliced_status, spliced_status_full), function(spl, 
   
   #merged
   exprs_mat <- do.call(Matrix::cbind2, exprs_mat_sep)
+  
+  exprs_mat_filt <- exprs_mat[cds_genes,]
 
 })
 names(exprs_mat_list) <- spliced_status_full
+
+
 
 assay(cds, "unspliced") <- exprs_mat_list[["unspliced"]]
 assay(cds, "spliced") <- exprs_mat_list[["spliced"]]
@@ -71,6 +79,8 @@ assay(cds, "spliced") <- exprs_mat_list[["spliced"]]
 
 ```{r}
 #works on sce and cds
-writeH5AD(cds, file = here("6mo_MENS_11-25.h5ad"), X_name = "counts")
+
+rownames(cds) <- fData(cds)$gene_short_name
+writeH5AD(cds, file = here("6mo_MENS.h5ad"), X_name = "counts")
 ```
 

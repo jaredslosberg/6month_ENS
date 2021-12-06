@@ -405,7 +405,7 @@ if(do.existing.embedding){
   pData(cds)$cell_type[pData(cds)$clusters == 16] <- "Macrophage-C"  
   pData(cds)$cell_type[pData(cds)$clusters == 17] <- "Smooth muscle cells B"
   pData(cds)$cell_type[pData(cds)$clusters == 18] <- "Macrophage-B" 
-  pData(cds)$cell_type[pData(cds)$clusters == 19] <- "Interstitium"
+  pData(cds)$cell_type[pData(cds)$clusters == 19] <- "Unknown"
   pData(cds)$cell_type[pData(cds)$clusters == 20] <- "NENs" 
   pData(cds)$cell_type[pData(cds)$clusters == 21] <- "Macrophage-C"  
 

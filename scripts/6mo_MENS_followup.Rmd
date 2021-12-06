@@ -407,4 +407,5 @@ pData(MENS) <- dplyr::select(as.data.frame(pData(MENS)), !starts_with("cellPatte
 
 saveRDS(MENS, file = here(glue("6mo_MENS.rds")))
 sessionInfo()
+
 ```
