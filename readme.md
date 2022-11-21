@@ -1,4 +1,8 @@
  # Analysis of 6month LMMP scRNA
+
+Raw FASTQs, count matrices, and metadata are available at GSE156146
+Current version of our [manuscript][https://www.biorxiv.org/content/10.1101/2020.08.25.262832v1.full]
+
 Library generated with 10xv2 chemistry
 Tissue prepped by longitudinal muscle myenteric plexus (LMMP) from two 6month animals (TH, TL)
  

@@ -1,0 +1,80 @@
+---
+title: "R Notebook"
+output: html_notebook 
+code_folding: show
+---
+
+```{r interactive_check}
+if(interactive()){
+  print(date())
+  print("This was run interactively. Please run with rmarkdown::render")
+}else{
+  print(paste0("This notebook was compiled on ", date()))
+}
+           
+```
+
+```{r, message = F, results = 'hide', warning = F}
+library(tidyverse)
+library(ComplexHeatmap)
+library(circlize)
+library(monocle3)
+library(projectR)
+library(here)
+library(glue)
+
+if(!dir.exists(here("teichman_gut_atlas/plots"))) dir.create(here("teichman_gut_atlas/plots"))
+```
+
+Load celldataset and projection pattern weights
+```{r}
+mesenchymal <- readRDS(here("teichman_gut_atlas/data/mesenchymal_gut_annotated.Rds"))
+
+cell_weights <- read.csv(here("teichman_gut_atlas/data/gut_atlas_in_6mo_LMMP_old_patterns.csv"), row.names = 1)
+
+#downsample
+mesenchymal <- mesenchymal[,sample(dim(mesenchymal)[2], 1000)]
+cell_weights <- cell_weights[colnames(mesenchymal),]
+```
+
+
+```{r}
+annot_name <- "Integrated_05"
+
+assertthat::assert_that(all(rownames(cell_weights) == rownames(pData(mesenchymal))))
+annot <- pData(mesenchymal)[,annot_name] %>% as.character()
+
+auc_res <- aucMat(annot, t(cell_weights))
+
+colnames(auc_res) <- stringr::str_split_fixed(colnames(auc_res), "labels", 2) %>% .[,2]
+```
+
+```{r}
+n_ct <- pData(mesenchymal) %>%
+  as.data.frame() %>%
+  group_by(Integrated_05) %>%
+  summarize(n_samp = n()) %>% mutate(label_n = glue("{Integrated_05} (n = {n_samp})"))
+n_ct
+
+colnames(auc_res)<- map(colnames(auc_res), function(ct){n_ct[which(n_ct[,"Integrated_05"] == ct), "label_n"]}) %>% unlist
+
+auc_threshold <- 0.8
+auc_res_pass <- auc_res > auc_threshold
+```
+
+
+```{r}
+pdf(here("teichman_gut_atlas/plots/projection_auc.pdf"), height = 12)
+  Heatmap(auc_res, cell_fun = function(j, i, x, y, w, h, fill){
+    if(auc_res_pass[i, j]) {
+        grid.text("*", x, y)
+    }
+  })
+dev.off()
+```
+
+
+
+```{r}
+sessionInfo()
+```

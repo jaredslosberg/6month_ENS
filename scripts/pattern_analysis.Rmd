@@ -35,7 +35,6 @@ set.seed(42)
 lmmp_6mo <- estimate_size_factors(lmmp_6mo)
 print(dim(lmmp_6mo))
 
-date <- "10-7"
 
 #Change this to something like cluster, cell type... whatever cell metadata to group by
 group_feature <- "clusters"
@@ -196,7 +195,7 @@ cont_features <- c("log10UMI","mito_ratio","tricyclePosition")
 
 pData(lmmp_6mo)$CCStage[is.na(pData(lmmp_6mo)$CCStage)] <- "NA"
 
-heatmaps <- patternFeatureCorrelationHeatmap(lmmp_6mo, cellWeights.df = cellWeights.df, discrete_features = disc_features, continuous_features = cont_features)
+heatmaps <- patternFeatureCorrelationHeatmap(lmmp_6mo, cellWeights.df = cellWeights.df, features = disc_features, returnData = F)
 
 hm_edit <- lapply(heatmaps[[1]], function(x){
   x@column_names_param$gp$fontsize <- 8
@@ -220,6 +219,8 @@ if(!do.existing.patterns){
   dev.off()
 }
 
+corr_mats <- patternFeatureCorrelationHeatmap(lmmp_6mo, cellWeights.df = cellWeights.df, features = disc_features, returnData = T)
+saveRDS(corr_mats, here("results/NMF/lmmp/old_pattern_run/50dims/pattern_cellType_correlations.rds"))
 ```
 
 # Dont save cds object because pattern names are ambiguous between runs. In the future load the patterns explicitly everytime they are used.

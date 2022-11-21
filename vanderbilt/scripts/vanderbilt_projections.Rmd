@@ -1,0 +1,192 @@
+---
+title: "Vanderbilt MENS projection - old patterns"
+output: html_notebook
+---
+
+```{r check_interactive}
+if(interactive()){
+  print(date())
+  print("This was run interactively. Please run with rmarkdown::render")
+}else{
+  print(paste0("This notebook was compiled on ", date()))
+}
+
+```
+
+```{r load, message = F, results= 'hide'}
+library(projectR)
+library(ggplot2)
+library(dplyr)
+library(monocle3)
+library(here)
+library(furrr)
+source(here("scripts/accessory_functions/monocle_mods.R"))
+source(here("scripts/accessory_functions/pattern_plotting.R"))
+source(here("scripts/accessory_functions/patternFeatureCorrelationHeatmap.R"))
+source(here("scripts/accessory_functions/convertHomologs.R"))
+
+if(!dir.exists(here("vanderbilt/data"))){
+  dir.create(here("vanderbilt/data"))
+}
+
+```
+
+
+```{r init}
+
+# none, cell_size_log, log
+norm_method <- "cell_size_log"
+
+#declare patterns of interest
+MENS_patterns <- c(16,27,32,41)
+select_patterns <- c(MENS_patterns)
+
+
+print(norm_method)
+
+print(select_patterns)
+
+###Load in projections ----
+##vanderbilt scRNA dataset filename
+vanderbilt_filename <- "/data/users/jared/vanderbilt_ens/cds.vanderbilt.10x_inDrop.rds"
+
+cds <- readRDS(vanderbilt_filename)
+
+#Previously learned gene weights from NMF on logscaled expression counts
+lmmp_6mo_patttern_geneweights_filename <- here("results/NMF/lmmp/old_pattern_run/50dims/pattern_gene_weights.csv")
+learned_weights <- read.csv(
+  file = lmmp_6mo_patttern_geneweights_filename,
+  row.names = 1)
+
+npattern <- dim(learned_weights)[2]
+
+
+plot_cells(cds, color_cells_by = "vanderbilt_clusters")
+plot_cells(cds, genes  = c("Msln","Slpi"))
+plot_cells(cds, genes = c("Ret","Snap25"))
+```
+
+Vanderbilt is mouse, patterns are defined in mouse, so convert genes to human
+```{r filter_genes}
+
+matched_genes <- intersect(rownames(learned_weights), rownames(cds))
+
+learned_weights_filt <- learned_weights[matched_genes,]
+rownames(learned_weights_filt) <- matched_genes
+
+#Now both are human genes, take intersection
+genes_to_use <- intersect(rownames(learned_weights), rownames(cds))
+
+cds_filt <- cds[genes_to_use,]
+learned_weights_filt <- learned_weights[genes_to_use,]
+```
+
+
+
+```{r projections} 
+load.existing.projection.values <- 0
+if(load.existing.projection.values){
+  #first column is cell barcodes, rest of columns are patterns
+  #transferred_cell_wts <- read.csv(paste0("./data/projections/",condition,"_ENS_",norm_method,"_in_TC_LMMP_9-18_patterns.csv"), row.names = 1)
+}else{
+  set.seed(131)
+  #TODO: update to switch statement
+  if(norm_method == "none"){ exprs_mat <- as.matrix(exprs(cds))}
+  if(norm_method == "log"){ exprs_mat <- as.matrix(log10(exprs(cds)+1))}
+  if(norm_method == "cell_size_log"){ 
+    exprs_mat <- normalized_counts(cds_filt) 
+    
+  }   
+  
+  #sparse matrix too large to convert to dense, so break into chunks
+  n_by <- 40000
+  n <- dim(cds_filt)[2]
+ 
+  breaks <- seq(from = 0, to = n, by= n_by)
+  if(breaks[length(breaks)] != n){
+    breaks <- c(breaks, dim(cds_filt)[2])
+  }
+  breaks
+  
+  exprs_list <- list()
+  for(i in c(1:(length(breaks)-1))){
+    #subset
+    exprs_mat_sub <- exprs_mat[, seq(breaks[i]+1, breaks[i+1], by = 1)]
+    exprs_list <- c(exprs_list, exprs_mat_sub)
+  }
+  names(exprs_list) <- paste0("sub", 1:(length(breaks)-1))
+  
+  #projection
+  transferred_cell_weights_list <- furrr::future_map(exprs_list, function(mat){
+    transferred_cell_wts_sub <- t(projectR::projectR(data = as.matrix(mat),
+                                                 loadings = as.matrix(learned_weights_filt)))
+    
+    colnames(transferred_cell_wts_sub) = paste0("cellPattern",1:npattern)
+    
+    return(transferred_cell_wts_sub)
+    
+  })
+  
+  transferred_cell_weights <- do.call(rbind, transferred_cell_weights_list)
+  
+  write.csv(transferred_cell_weights,paste0(here("vanderbilt/data/vanderbilt_in_6mo_LMMP_old_patterns.csv")),
+            quote = F, row.names = T)
+}
+
+```
+
+```{r}
+
+#Bind pattern weights to object, make sure cells are exactly the same. Could left_merge but pData not being a true data.frame is an issue
+assertthat::assert_that(all(rownames(pData(cds)) == rownames(transferred_cell_weights)),
+                        msg = "Cells in projection weights matrix are not the same as cells in cds object")
+pData(cds) <- cbind(pData(cds), transferred_cell_weights)
+pData(cds)[,"log10UMI"] <- log10(pData(cds)[,"total"] +1)
+
+pattern_wt_plots <- lapply(select_patterns, plotCellPatterns, cds_obj = cds, do.clip = c(0.01,0.99))
+pattern_wt_plots
+```
+
+```{r, eval = F}
+#calculate UMAP based on projected pattern weights instead of PCA
+do.reembed <- 0
+if (do.reembed){
+  
+  #embed based on usage of all patterns
+  features_of_interest <- transferred_cell_weights[,paste0("cellPattern",select_patterns)]
+  umap_res <- uwot::umap(as.matrix(features_of_interest),
+                         metric="cosine",
+                         min_dist = 0.1,
+                         nn_method = "annoy")
+  
+  reducedDims(cds)$NMF_UMAP <- umap_res
+  
+  p <- plot_cells_mod(cds, reduction_method = "NMF_UMAP", color_cells_by = "vanderbilt_clusters", label_cell_groups = F) + 
+    ggtitle(paste0("UMAP embedding based on projections of all LMMP patterns"))
+  
+  #color on select patterns
+  p_wt_plots <-lapply(select_patterns, plotCellPatterns, cds, red_method = "NMF_UMAP", do.clip = c(0.01,0.99))
+  
+}      
+
+p
+
+p_wt_plots
+
+```
+
+```{r}
+plot_genes_by_group(cds, group_cells_by = "vanderbilt_clusters", markers = c("Msln","Cdh3","Fmo2","Slpi","C3","Wt1","Upk3b","Slc17a9")) + coord_flip() + theme(axis.text.y = element_text(size = 6))
+
+
+# pattern_usage_plots <- lapply(paste0("cellPattern",select_patterns), plotPatternUsageByCondition, cds, bin_by = "Age") 
+# pattern_usage_plots <- lapply(pattern_usage_plots, function(x){
+#   x + theme(axis.text.x = element_text(angle = 90))
+# })
+# pattern_usage_plots[[1]] + theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r}
+saveRDS(cds, here("vanderbilt/data/cds.vanderbilt.10x_inDrop_annotated.rds"))
+```
+

@@ -10,9 +10,9 @@ mens_6mo_counts.rds
 6moLMMP*
 6mo_LMMP*
 results/
-preprocessing/
+
 #This isn't working
-!preprocessing/scripts
+
 !preprocessing/bustools_required_files_10xv2_mm/737K-august-2016.txt
 
 preprocessing_old/
@@ -29,13 +29,6 @@ projections/
 
 
 #project specific data
-
-tabula_muris/*
-!tabula_muris/scripts/*.R
-teichman_gut_atlas/*
-!teichman_gut_atlas/scripts/*.Rmd
-vanderbilt/
-
 ligand_receptors
 
 mens/umap_*

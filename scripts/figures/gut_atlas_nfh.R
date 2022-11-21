@@ -48,6 +48,14 @@ plot_cells(nfh,
            label_cell_groups = F) 
 dev.off()
 
+pdf(here("plots/supp_figures/mesenchymal_nfh_dcn.pdf"), width = 9, height = 6)
+#use bigger cell size for png
+plot_cells(nfh,
+           genes = c("DCN"),
+           cell_size = .35,
+           label_cell_groups = F) 
+dev.off()
+
 #mesenchymal, non fetal healthy
 pdf(here("plots/supp_figures/mesenchymal_nfh_umap.pdf"))
 #use bigger cell size for png

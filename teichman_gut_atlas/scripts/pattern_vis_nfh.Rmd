@@ -1,0 +1,64 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+Patterns were learned on the 6mo MENs and the gut cell atlas was projected into them. Now look at the subset of non-fetal healthy samples and visualize the pattern usages
+
+```{r, message = FALSE, results = 'hide'}
+library(monocle3)
+library(dplyr)
+library(here)
+
+source(here("scripts/accessory_functions/monocle_mods.R"))
+source(here("scripts/accessory_functions/pattern_plotting.R"))
+```
+
+```{r}
+obj_fn <- "/data/users/jared/atlas_processing/gut_cell_atlas/data/mesenchymal_gut_nonfetal_healthy.Rds"
+
+cds <- readRDS(obj_fn)
+
+```
+
+Pattern definitions in 6month LMMP
+```{r,out.width='1000pt', out.height='1000pt'}
+knitr::include_graphics(here("plots/NMF/lmmp/old_pattern_run/50dims/LMMP_pattern_feature_correlation.pdf"))
+```
+
+```{r}
+
+cell_wt <- data.table::fread(here("teichman_gut_atlas/data/gut_atlas_in_6mo_LMMP_old_patterns.csv"), data.table = F)
+colnames(cell_wt)[1] <- "cell_index"
+
+all(colnames(cds) %in% rownames(cell_wt))
+```
+
+From previously generated pattern projections, load in values and merge with existing pData
+```{r}
+pData(cds) <- pData(cds) %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column(var = "cell_index") %>%
+  left_join(., cell_wt, by = "cell_index") %>%
+  tibble::column_to_rownames(var = "cell_index") %>%
+  DataFrame
+```
+
+```{r}
+plot_cells_mod(cds, color_cells_by = "Age") + facet_wrap(~ Age)
+
+plot_cells_mod(cds, color_cells_by = "Integrated_05", label_cell_groups = F) +
+  theme(legend.position = "none") +
+  facet_wrap(~ Integrated_05)
+
+
+```
+
+```{r}
+npatt <- 50
+lapply(1:npatt, plotCellPatterns, cds, do.clip = c(0.01,0.99))
+```
+```{r}
+saveRDS(cds, here("teichman_gut_atlas/data/mesenchymal_gut_nfh_annotated.rds"))
+```
+

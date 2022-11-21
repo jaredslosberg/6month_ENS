@@ -1,0 +1,61 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+Specific and highly expressed genes in potential MENs clusters
+
+```{r}
+library(monocle3)
+library(dplyr)
+library(here)
+library(purrr)
+```
+
+```{r}
+
+cds <- readRDS(here("teichman_gut_atlas/data/mesenchymal_gut_annotated.Rds"))
+
+plot_cells(cds)
+
+```
+
+```{r}
+pot_mens <- c(20,32, 34)
+
+res <- monocle3::top_markers(cds, genes_to_test_per_group = 50, cores = 32, verbose = T)
+```
+
+```{r}
+res_filt <- res %>% filter(cell_group %in% pot_mens)
+```
+
+```{r}
+gr_df <- pData(cds) %>% as.data.frame() %>% tibble::rownames_to_column(var = "cell_index") %>% select(all_of(c("cell_index","umap.clusters")))
+
+agg_res <- aggregate_gene_expression(cds, cell_group_df = gr_df, norm_method = "log", scale_agg_values = F)
+
+exprs_filt <- agg_res[,pot_mens] %>% as.matrix %>% as.data.frame() %>% setNames(paste0("cluster_", names(.)))
+
+exprs_filt[,"cluster_20_rank"] <- rank(-exprs_filt[,"cluster_20"], ties = "first")
+exprs_filt[,"cluster_32_rank"] <- rank(-exprs_filt[,"cluster_32"], ties = "first")
+
+exprs_filt[,"cluster_34_rank"] <- rank(-exprs_filt[,"cluster_34"], ties = "first")
+
+exprs_filt <- exprs_filt %>% filter(cluster_20_rank <= 50 | cluster_32_rank <= 50 | cluster_34_rank <= 50)
+
+```
+## Specific genes in non-fetal healthy samples
+
+```{r}
+nfh <- readRDS("/data/users/jared/atlas_processing/gut_cell_atlas/data/mesenchymal_gut_nonfetal_healthy.Rds")
+
+#TODO: cluster in atlas_processing script
+plot_cells(nfh, color_cells_by = "Integrated_05")
+```
+
+```{r}
+res <- monocle3::top_markers(cds, genes_to_test_per_group = 50, cores = 32, verbose = T)
+
+```
+
