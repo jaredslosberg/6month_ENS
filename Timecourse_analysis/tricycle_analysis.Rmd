@@ -1,0 +1,154 @@
+---
+title: "tricycle_analysis"
+author: "Jared Slosberg"
+date: "4/5/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(monocle3)
+library(tricycle)
+library(tidyverse)
+library(ggplot2)
+library(here)
+library(cowplot)
+```
+
+```{r}
+name <- "TC_LMMP"
+
+
+lmmp <- readRDS(here(paste0(name,".rds")))
+rownames(lmmp) <- fData(lmmp)[,"gene_id_trimmed"]
+counts_list <- assays(lmmp)
+
+assay(lmmp, "logcounts") <- normalized_counts(lmmp)
+
+plot_cells(lmmp)
+  
+```
+
+```{r}
+
+
+lmmp <- tricycle::project_cycle_space(lmmp, exprs_values = "logcounts")
+
+#plot pca
+p1 <- scater::plotReducedDim(lmmp, dimred = "tricycleEmbedding") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(lmmp))) + 
+  theme_bw(base_size = 14)
+
+lmmp <- estimate_cycle_position(lmmp)
+
+#plot pca
+p2 <- scater::plotReducedDim(lmmp, dimred = "tricycleEmbedding", colour_by = "tricyclePosition") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(lmmp))) + 
+  theme_bw(base_size = 14)
+
+#schwabe
+lmmp <- estimate_cycle_stage(lmmp, gname.type = 'ENSEMBL', species = 'mouse', exprs_values = "logcounts")
+
+scater::plotReducedDim(lmmp, dimred = "tricycleEmbedding", colour_by = "CCStage") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(lmmp))) +
+  theme_bw(base_size = 14)
+
+##cylic scale
+p <- plot_emb_circle_scale(lmmp, dimred = 1, point.size = 3.5, point.alpha = 0.9) +
+  theme_bw(base_size = 14)
+legend <- circle_scale_legend(text.size = 5, alpha = 0.9)
+p3 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.4))
+
+pca_emb_pos <- reducedDim(lmmp, "tricycleEmbedding")
+tric_pos <- as.data.frame(colData(lmmp))[,"tricyclePosition"]
+
+#Add back to cds object
+reducedDim(lmmp, "tricycleEmbedding") <- pca_emb_pos
+pData(lmmp)[,"tricyclePosition"] <- tric_pos
+
+p<-plot_emb_circle_scale(lmmp, dimred = "UMAP", color_by = "tricyclePosition")
+p4 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.1))
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+
+saveRDS(lmmp, here(paste0(name,".rds")))
+
+
+```
+
+```{r}
+mens <- lmmp[, pData(lmmp)$cell_type == "MENs"]
+
+plot_cells(mens)
+
+#plot pca
+p1 <- scater::plotReducedDim(mens, dimred = "tricycleEmbedding") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(mens))) + 
+  theme_bw(base_size = 14)
+
+
+
+#plot pca
+p2 <- scater::plotReducedDim(mens, dimred = "tricycleEmbedding", colour_by = "tricyclePosition") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(mens))) + 
+  theme_bw(base_size = 14)
+
+
+scater::plotReducedDim(mens, dimred = "tricycleEmbedding", colour_by = "CCStage") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(mens))) +
+  theme_bw(base_size = 14)
+
+##cylic scale
+p <- plot_emb_circle_scale(mens, dimred = 1, point.size = 3.5, point.alpha = 0.9) +
+  theme_bw(base_size = 14)
+legend <- circle_scale_legend(text.size = 5, alpha = 0.9)
+p3 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.4))
+
+pca_emb_pos <- reducedDim(mens, "tricycleEmbedding")
+tric_pos <- as.data.frame(colData(mens))[,"tricyclePosition"]
+
+p<-plot_emb_circle_scale(mens, dimred = "UMAP", color_by = "tricyclePosition")
+p4 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.1))
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+```
+
+Genes that change with cell cycle
+
+```{r}
+pData(mens)$sinTric <- sin(pData(mens)$tricyclePosition)
+pData(mens)$cosTric <- cos(pData(mens)$tricyclePosition)
+
+use_genes <- (((exprs(mens) > 0) %>% Matrix::rowSums()) > 50) 
+res <- fit_models(mens[use_genes,], "~ sinTric*cosTric + log10UMI", cores = 16)
+
+coef <- coefficient_table(res) %>%
+  dplyr::select(gene_id_trimmed, gene_short_name, term, estimate, std_err, test_val, p_value, normalized_effect, q_value)
+```
+
+```{r}
+write.csv(coef, here("results/tricycle_cc_varying_genes.csv"))
+```
+

@@ -1,0 +1,220 @@
+---
+title: "tricycle_analysis Neuro subset"
+author: "Jared Slosberg"
+date: "4/5/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(monocle3)
+library(tricycle)
+library(tidyverse)
+library(ggplot2)
+library(here)
+library(cowplot)
+
+source(here("scripts/accessory_functions/monocle_mods.R"))
+```
+
+```{r}
+name <- "TC_Neuro"
+
+
+neuro <- readRDS(here(paste0(name,".rds")))
+rownames(neuro) <- fData(neuro)[,"gene_id_trimmed"]
+counts_list <- assays(neuro)
+
+assay(neuro, "logcounts") <- normalized_counts(neuro)
+
+plot_cells(neuro)
+
+#Change IPAN to NENs for annotation by group
+pData(neuro)$cell_type_aggregate <- pData(neuro)$cell_type %>% str_replace(., "neuroglia/neuroendocrine", "NENs")
+  
+```
+
+```{r}
+
+
+neuro <- tricycle::project_cycle_space(neuro, exprs_values = "logcounts")
+
+#plot pca
+p1 <- scater::plotReducedDim(neuro, dimred = "tricycleEmbedding") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(neuro))) + 
+  theme_bw(base_size = 14)
+
+neuro <- estimate_cycle_position(neuro)
+
+#plot pca
+p2 <- scater::plotReducedDim(neuro, dimred = "tricycleEmbedding", colour_by = "tricyclePosition") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(neuro))) + 
+  theme_bw(base_size = 14)
+
+#schwabe
+neuro <- estimate_Schwabe_stage(neuro, gname.type = 'ENSEMBL', species = 'mouse', exprs_values = "logcounts")
+
+scater::plotReducedDim(neuro, dimred = "tricycleEmbedding", colour_by = "CCStage") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(neuro))) +
+  theme_bw(base_size = 14)
+
+##cylic scale
+p <- plot_emb_circle_scale(neuro, dimred = 1, point.size = 3.5, point.alpha = 0.9) +
+  theme_bw(base_size = 14)
+legend <- circle_scale_legend(text.size = 5, alpha = 0.9)
+p3 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.4))
+
+pca_emb_pos <- reducedDim(neuro, "tricycleEmbedding")
+tric_pos <- as.data.frame(colData(neuro))[,"tricyclePosition"]
+
+#Add back to cds object
+reducedDim(neuro, "tricycleEmbedding") <- pca_emb_pos
+pData(neuro)[,"tricyclePosition"] <- tric_pos
+
+p<-plot_emb_circle_scale(neuro, dimred = "UMAP", color_by = "tricyclePosition")
+p4 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.1))
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+
+
+
+```
+```{r}
+mens <- neuro[, pData(neuro)$cell_type == "MENs"]
+
+plot_cells(mens)
+
+#plot pca
+p1 <- scater::plotReducedDim(mens, dimred = "tricycleEmbedding") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(mens))) + 
+  theme_bw(base_size = 14)
+
+
+
+#plot pca
+p2 <- scater::plotReducedDim(mens, dimred = "tricycleEmbedding", colour_by = "tricyclePosition") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(mens))) + 
+  theme_bw(base_size = 14)
+
+
+scater::plotReducedDim(mens, dimred = "tricycleEmbedding", colour_by = "CCStage") +
+  labs(x = "Projected PC1", y = "Projected PC2") +
+  ggtitle(sprintf("Projected cell cycle space (n=%d)",
+                  ncol(mens))) +
+  theme_bw(base_size = 14)
+
+##cylic scale
+p <- plot_emb_circle_scale(mens, dimred = 1, point.size = 3.5, point.alpha = 0.9) +
+  theme_bw(base_size = 14)
+legend <- circle_scale_legend(text.size = 5, alpha = 0.9)
+p3 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.4))
+
+pca_emb_pos <- reducedDim(mens, "tricycleEmbedding")
+tric_pos <- as.data.frame(colData(mens))[,"tricyclePosition"]
+
+p<-plot_emb_circle_scale(mens, dimred = "UMAP", color_by = "tricyclePosition")
+p4 <- plot_grid(p, legend, ncol = 2, rel_widths = c(1, 0.1))
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+```
+
+```{r}
+plot_cells_mod(neuro, reduction_method = "tricycleEmbedding", color_cells_by = "cell_type", cell_size = 1.8) + facet_wrap(~cell_type)
+```
+Confidence in cell cycle position estimates
+```{r}
+cart2pol <- function(x, y)
+{
+  r <- sqrt(x^2 + y^2)
+  t <- atan(y/x)
+
+  data.frame(tricycleRadius = r, theta = t)
+}
+
+radius <- reducedDim(neuro, "tricycleEmbedding")
+
+pol_coord <- cart2pol(radius[,"PC1"], radius[,"PC2"])
+
+assertthat::assert_that(all(rownames(pData(neuro)) == rownames(pol_coord)))
+pData(neuro) <- cbind(pData(neuro), pol_coord[,"tricycleRadius", drop = F])
+
+ggplot(as.data.frame(pData(neuro)), aes(x = tricyclePosition, y = tricycleRadius)) + geom_point(aes(color = cell_type_aggregate), size = .75) + facet_wrap(~cell_type_aggregate) + geom_smooth()
+```
+
+
+Genes that change with cell cycle
+
+```{r, eval = F}
+pData(mens)$sinTric <- sin(pData(mens)$tricyclePosition)
+pData(mens)$cosTric <- cos(pData(mens)$tricyclePosition)
+
+use_genes <- (((exprs(mens) > 0) %>% Matrix::rowSums()) > 50) 
+res <- fit_models(mens[use_genes,], "~ sinTric*cosTric + log10UMI", cores = 16)
+
+coef <- coefficient_table(res) %>%
+  dplyr::select(gene_id_trimmed, gene_short_name, term, estimate, std_err, test_val, p_value, normalized_effect, q_value)
+```
+
+```{r}
+
+#Continuous
+tricycle::plot_ccposition_den(neuro$tricyclePosition,neuro$cell_type_aggregate,
+                              'cell type', type = "linear",bw = 10,
+                              fig.title = "Kernel density of \u03b8") +
+  theme_bw(base_size = 14)
+
+tricycle::plot_ccposition_den(neuro$tricyclePosition,neuro$cell_type_aggregate,
+                              'cell type', type = "circular",bw = 10,
+                              fig.title = "Kernel density of \u03b8") +
+  theme_bw(base_size = 14)
+
+
+#Discrete
+as.data.frame.matrix(table(as.data.frame(pData(neuro)[,c("cell_type_aggregate", "CCStage")]), useNA = "ifany"))
+```
+
+Cell cycle genes
+```{r}
+
+genes_sn <- c("Top2a", "Ect2", "Met","Ret", "Ncam1")
+cds_sub <- neuro[fData(neuro)$gene_short_name %in% genes_sn]
+rownames(cds_sub) <- fData(cds_sub)$gene_short_name
+
+dat_mat <- assay(cds_sub, "logcounts") %>% as.matrix() %>% t() %>%
+  cbind(., as.data.frame(pData(cds_sub)[,c("tricyclePosition", "cell_type_aggregate")]))
+
+map(genes_sn, function(gn){
+  ggplot(dat_mat, aes_string(x = "tricyclePosition", y = gn)) +
+    geom_point(aes(color = cell_type_aggregate), size = .75) +
+    facet_wrap(~cell_type_aggregate) + geom_smooth() +
+    ggtitle(gn)
+})
+```
+
+
+```{r}
+write.csv(coef, here("results/tricycle_cc_varying_genes_neuro.csv"))
+
+saveRDS(neuro, here("TC_Neuro.rds"))
+```
+

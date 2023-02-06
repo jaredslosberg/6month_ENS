@@ -1,0 +1,625 @@
+---
+title: 'MES Timecourse JS: original + resequencing'
+author: "Jared Slosberg"
+date: "8/17/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r init, echo = T}
+.libPaths("/home/jared/R/x86_64-pc-linux-gnu-library/4.0/")
+#source('scripts/init.R')
+library(BUSpaRse)
+library(monocle3)
+library(DropletUtils)
+library(ggplot2)
+library(org.Mm.eg.db)
+library(dplyr)
+library(biomaRt)
+#library(xtable)
+library(scales)
+library(scran)
+library(ComplexHeatmap)
+library(circlize)
+library(plot.matrix)
+library(htmlwidgets)
+library(viridis)
+library(ggpubr)
+
+source("/home/jared/ENS/Timecourse_ENS/scripts/accessory_functions/monocle_mods.R")
+
+set.seed(210)
+
+print.results <- 0
+```
+
+# Create monocle sc object from kallisto pipeline output
+# Generate knee plots and filter each sample by a minimum UMI count per cell
+```{r}
+samples<-c("p10","p11","p20","p21","p60","p61") 
+kallisto_out_dir <- "/home/jared/ENS/Timecourse_ENS/preprocessing/kallisto_out/"
+
+
+cds_list<-list()
+# Read genes.mtx
+for (i in 1:length(samples)){
+    print(samples[i])
+    mat<-t(Matrix::readMM(paste0(kallisto_out_dir,samples[i],"/spliced/s.mtx")))
+    gene_info<-readr::read_tsv(paste0(kallisto_out_dir,samples[i],"/spliced/s.genes.txt"), col_names = FALSE)
+    barcodes<-readr::read_tsv(paste0(kallisto_out_dir,samples[i],"/spliced/s.barcodes.txt"), col_names = FALSE)
+    
+    cds<-new_cell_data_set(mat,
+                         cell_metadata = barcodes,
+                         gene_metadata = gene_info)
+    
+    pData(cds)$sample<-samples[i]
+    
+    cds_list<-c(cds_list,cds)
+}
+
+do.knee <- 0
+#Generate knee plots to assess umi counts over cells
+numExpected<-6000 #cells targeted
+UMI_cutoff<-1000
+if(do.knee){
+  if(print.results){
+    pdf("/home/jared/ENS/Timecourse_ENS/plots/knee-plots",width=6,height=6)
+  }  
+  lapply(1:length(samples), function(sampleIdx){
+      print(samples[sampleIdx])
+      #tot_counts<-Matrix::colSums(exprs(cds_list[[sampleIdx]]))
+      bc_rank <- barcodeRanks(exprs(cds_list[[sampleIdx]]), lower = 80)
+      
+      print(qplot(bc_rank$total, bc_rank$rank, geom = "line") +
+        geom_vline(xintercept = metadata(bc_rank)$knee, color = "blue", linetype = 2) +
+        geom_vline(xintercept = metadata(bc_rank)$inflection, color = "green", linetype = 2) +
+        geom_vline(xintercept = UMI_cutoff, color = "darkred", linetype = 2) +
+        geom_hline(yintercept = numExpected, color = "black", linetype = 2) +
+        annotate("text", y = c(1000,5000,10000), x = 1.5 * c(metadata(bc_rank)$knee, metadata(bc_rank)$inflection,UMI_cutoff),
+                 label = c(
+                     paste0("knee= ",metadata(bc_rank)$knee," UMIs"), 
+                     paste0("inflection= ",metadata(bc_rank)$inflection," UMIs"),
+                     paste0("UMI_cutoff = ",UMI_cutoff)
+                     ),
+                     color = c("blue", "green","darkred")) +
+        scale_x_log10() +
+        scale_y_log10() +
+        labs(y = "Barcode rank", x = "Total UMI count") + 
+        ggtitle(paste0("Knee Plot - ",samples[sampleIdx]))
+      )
+  })
+  if(print.results) dev.off()
+  
+  
+  timestamped_bcrank_list <- lapply(1:length(samples), function(idx){
+      print(samples[idx])
+      bc_rank <- barcodeRanks(exprs(cds_list[[idx]]), lower = 80)
+      bc_rank <- as.data.frame(bc_rank@listData) #loses knee and inflection points, but ok
+      bc_rank$sample_time <- samples[idx]
+      return(bc_rank)
+  })
+  
+  timestamped_bc_ranks <- do.call(rbind, timestamped_bcrank_list)
+  
+  ggplot(data = timestamped_bc_ranks, aes(x = total, y = rank)) + geom_line(aes(color = sample_time)) +
+    scale_x_log10(breaks = trans_breaks("log10", 
+                                        function(x) 10^x),labels = trans_format("log10",math_format(10^.x))) +     scale_y_log10(breaks = trans_breaks("log10", 
+                                        function(x) 10^x),labels = trans_format("log10",math_format(10^.x))) +     geom_hline(yintercept = numExpected, color = "black", linetype = "dashed") + 
+    annotate("text", label = paste0(numExpected, " cells"), x = 10, y = 6500, size = 4, colour = "black") +
+    geom_vline(xintercept = UMI_cutoff, color = "black", linetype = "dashed") +
+    annotate("text", label = paste0(UMI_cutoff, " UMI"), x = 1000, y = 100, size = 4, colour = "black") +
+    theme_bw() + annotation_logticks() +
+    labs(title = "Knee plots for all samples", x = "UMIs per barcode", y = "Barcode rank")
+}  
+  
+  
+
+
+```
+Using emptyDrops(), detect the composition of the background mRNA signal that could be incorporated into droplets. Use this as an initial filter to remove cells with a greater than 10% FDR, prior to filtering on UMI or mitochondrial content.
+```{r, eval = T}
+do.empty.drops <- 0
+
+if(do.empty.drops){
+  dual_gg_colors <- scales::hue_pal()(2)
+  
+  pdf("/home/jared/ENS/Timecourse_ENS/plots/emptydrops.pdf", width = 15)
+  ed_out_list <- lapply(1:length(samples), function(sampleIdx){
+  #Checking knee plots shows knee not appropriately identified for p20. Manually set for p20.
+  #Setting retain as null defaults to knee of plot
+  
+  low_cutoff <- 200
+  FDR_cutoff <- 0.01
+  
+  ed <- emptyDrops(m=exprs(cds_list[[sampleIdx]]),retain = Inf, lower = low_cutoff)
+  ed$is.cell <- as.factor(ed$FDR < FDR_cutoff)
+  
+  p3 <- ggplot(as.data.frame(ed)[ed$Total > low_cutoff,], aes(x = Total, fill = is.cell)) + geom_density(alpha = .5) +
+    scale_x_log10() + ggtitle(paste0("Density of UMIs in empty vs non-empty droplets (> ", low_cutoff, " UMI")) +
+    annotate(geom = "text", label = paste0(sum(ed$is.cell[ed$Total > low_cutoff] == FALSE),
+                                           " empty droplets"), x = 1e4, y= 3.5, color = dual_gg_colors[1]) +
+    annotate(geom = "text", label = paste0(sum(ed$is.cell[ed$Total > low_cutoff] == TRUE),
+                                           " non-empty droplets"), x = 1e4, y= 4, color = dual_gg_colors[2])
+  
+  # p1 <- ggplot(data = as.data.frame(ed[order(ed$Total),])) +
+  #   geom_point(aes(x = Total, y = rev(1:length(Total)), color = FDR)) +
+  #   scale_color_viridis(trans = "log", limits = c(1, 2e4), breaks = c(1, 1e1, 1e2, 1e3, 1e4)) +
+  #   scale_x_log10() + scale_y_log10() +
+  #   ggtitle(paste0("Empty drops results for ", samples[sampleIdx]))
+  
+  p2 <- ggplot(data = as.data.frame(ed[order(ed$Total),])) +
+    geom_bin2d(aes(x = Total, y = FDR, color = FDR), binwidth = c(0.05,0.05)) +
+    scale_x_log10() + scale_y_log10() +
+    scale_fill_viridis(name = "density", trans = "log", limits = c(1, 2e4),
+                       breaks = c(1, 1e1, 1e2, 1e3, 1e4)) +
+    ggtitle(paste0(samples[sampleIdx],": FDR of ",sum(!is.na(ed$FDR))," droplets with UMI > ", low_cutoff,")")) +
+    geom_vline(xintercept = 600, color = "black", linetype = "dashed") +
+    annotate("text", label = paste0(600, " UMI"), x = 600, y = 1.3, size = 4, colour = "black")+
+    geom_hline(yintercept = FDR_cutoff, color = "red", linetype = "dashed") +
+    annotate("text", label = paste0(FDR_cutoff, " FDR"), x = 200, y = 0.2, size = 4, colour = "black")
+  
+  pl <- ggarrange(p2,p3, ncol = 1)
+  print(pl)
+  
+  return(ed)
+  })
+  dev.off()
+} else {
+  ed_out_list <- NULL
+}
+
+
+
+```
+
+
+Do the filtering at specified cutoffs
+```{r}
+
+#Filter empty droplets, first drop droplets below 200 UMI and then use plots below to determine appropriate threshold
+UMI_cutoff<-200
+do.empty.drops
+
+if(do.empty.drops){
+  filtered_cds_list <- mapply(function(cd,ed){
+                        pData(cd)$Total_UMIs<-Matrix::colSums(exprs(cd))
+                        #Empty drops also drops droplets with below "lower" UMI (see above)
+                        filtered_cds <- cd[,which(ed$is.cell == TRUE)]
+                        return(filtered_cds)
+                      }, cds_list, ed_out_list)
+} else{
+    filtered_cds_list <- lapply(cds_list, function(cd){
+                        pData(cd)$Total_UMIs<-Matrix::colSums(exprs(cd))
+                        filtered_cds<-cd[, pData(cd)$Total_UMIs > UMI_cutoff]
+                        return(filtered_cds)
+                        })
+}  
+   
+ 
+
+#Combine cds files
+#cds<-combine_cds(filtered_cds_list, cell_names_unique = TRUE)
+cds<-do.call(cbind,filtered_cds_list)
+cds<-detect_genes(cds, min_expr = 0)
+
+colnames(fData(cds))<-c("gene_id")
+rownames(cds)<-fData(cds)$gene_id
+colnames(pData(cds))[1]<-"barcode"
+rownames(pData(cds))<-paste(pData(cds)$barcode,pData(cds)$sample,sep=".")
+colnames(cds)<-rownames(pData(cds))
+
+```
+
+## Get and add gene symbols from biomart
+```{r}
+#Gene ID mappings using org.mm.eg are good but return "NA" for about half of ensembl id's, including many mitochondrial genes
+#fData(cds)$gene_id_trimmed<-stringr::str_split_fixed(fData(cds)$gene_id,"\\.",2)[,1]
+#symb <- mapIds(org.Mm.eg.db, keys=fData(cds)$gene_id_trimmed, keytype="ENSEMBL", column="SYMBOL")
+#fData(cds)<-merge(fData(cds),as.data.frame(symb),by.x="gene_id_trimmed",by.y=0, all.x = TRUE,sort=FALSE)
+#colnames(fData(cds))<-c("gene_id_trimmed","gene_id","num_cells_expressed","gene_short_name")
+
+#get gene names, make sure to use the right ensembl archive for genome used for alignment
+#listMarts()
+ensembl <- useMart("ensembl", host = "http://jan2020.archive.ensembl.org") #mm 99
+datasets <- listDatasets(ensembl)
+ensembl <- useDataset("mmusculus_gene_ensembl",mart=ensembl)
+
+fData(cds)$gene_id_trimmed <- stringr::str_split_fixed(fData(cds)$gene_id,"\\.",2)[,1]
+gene_description <- getBM(attributes = c("ensembl_gene_id_version","external_gene_name","description","chromosome_name"),
+                   filters = "ensembl_gene_id", values = fData(cds)$gene_id_trimmed,  mart = ensembl)
+
+#Prepare info as data frame for merging with sc object
+rownames(gene_description) <- stringr::str_split_fixed(gene_description[,1],"\\.",2)[,1]
+gene_description <- gene_description["external_gene_name"]
+
+#This merge might give the wrong result if gene_description and fData are not matched. Try left_join(...) instead.
+fData(cds) <- merge(fData(cds), gene_description, by.x="gene_id_trimmed", by.y = 0, all.x = TRUE, sort = FALSE)
+colnames(fData(cds)) <- c("gene_id_trimmed","gene_id","num_cells_expressed","gene_short_name")
+
+fData(cds)$gene_short_name <- make.unique(fData(cds)$gene_short_name)
+
+
+```
+
+
+# Now with gene names, calculate mitochondrial gene percentage in each cell for quality assessment. Filter on UMI and mt ratio
+```{r}
+
+mito_genes<-fData(cds)$gene_id[grepl("^mt-",fData(cds)$gene_short_name)]
+
+pData(cds)$mt_reads <- Matrix::colSums(exprs(cds)[mito_genes,])
+pData(cds)$total_reads  <- Matrix::colSums(exprs(cds))
+pData(cds)$mito_ratio <- pData(cds)$mt_reads/pData(cds)$total_reads
+
+#cds[,pData(cds)$Total_UMIs > 0]
+#use_genes <- Matrix::rowSums(exprs(cds)) > 0
+#cds <- cds[use_genes,]
+
+###How many cells would remain for different UMI cut offs?
+calc_cells_remaining <- function(UMI_low, UMI_high, UMI_n, mt_high, mt_low, mt_n, cds){
+  
+  #create blank matrix
+  cells_remain <- matrix(rep(NA,UMI_n*mt_n), nrow = mt_n)
+  
+  #create threshold levels. mt should be decreasing, UMI should be increasing
+  mt_levels <- rev(seq(from = mt_low, to = mt_high, length.out = mt_n))
+  UMI_levels <- seq(from = UMI_low, to = UMI_high, length.out = UMI_n)  
+  
+  for (x in 1:length(mt_levels)){
+    for (y in 1:length(UMI_levels)){
+      #print(x);print(y)
+      cells_remain[x,y] <-sum(pData(cds)$Total_UMIs > UMI_levels[y] & pData(cds)$mito_ratio < mt_levels[x])
+
+    }
+  }
+  rownames(cells_remain) <- paste0("< ",mt_levels)
+  colnames(cells_remain) <- paste0("> ",UMI_levels, " UMI")
+  return(cells_remain)
+}
+
+cells_post_threshold <- calc_cells_remaining(UMI_low = 200, UMI_high = 1000, UMI_n = 9, mt_high = 0.4, mt_low = 0.1, mt_n = 4, cds = cds)
+
+#Simple heatmap
+plot(cells_post_threshold, fmt.cell='%.0f', border=NA,
+     breaks = seq(from = min(cells_post_threshold), to = max(cells_post_threshold), length.out = 50),
+     xlab = 'UMI threshold', ylab= 'mitochondrial % threshold',
+     key = NULL)
+
+cells_post_threshold <- calc_cells_remaining(UMI_low = 200, UMI_high = 1000, UMI_n =17, mt_high = 0.4, mt_low = 0.1, mt_n = 13, cds = cds)
+
+#More complex
+col_fun = colorRamp2(c(floor(range(log2(cells_post_threshold))[1]), ceiling(range(log2(cells_post_threshold))[2])), c("purple", "yellow"))
+
+#Change the parameters manually
+ComplexHeatmap::Heatmap(log2(cells_post_threshold), col = col_fun,
+                column_title = "Droplets remaining at various thresholds",
+                column_title_gp = gpar(fontsize = 20, fontface = "bold"), column_title_side = "top",
+                row_title = "mitochondrial ratio cutoff",
+                show_row_dend = F, show_column_dend = F,
+                heatmap_legend_param = list(title = "Droplets",col_fun = col_fun,
+                                            at = log2(seq(from = 20000, to = 320000, by = 60000)),
+                labels = seq(from = 20000, to = 320000, by = 60000)))
+
+
+#Do the filtering
+final_mt_threshold <- 0.2
+final_UMI_threshold <- 600
+
+cds <- cds[, pData(cds)$mito_ratio <= final_mt_threshold]
+cds <- cds[, pData(cds)$Total_UMIs >= final_UMI_threshold]
+
+# How many cells remain per sample?
+#filter here on mito genes if desired
+for(i in 1:length(samples)){
+  print(samples[i])
+  print(sum(pData(cds)$sample == samples[i]))
+  }
+
+
+
+# Summary stats
+cds<-detect_genes(cds, min_expr = 0)
+
+assay(cds, "logcounts") <- normalized_counts(cds, norm_method = "log")
+
+```
+
+# Preprocess merged CDS
+```{r}
+cds <- estimate_size_factors(cds)
+cds <- preprocess_cds(cds, num_dim = 50, verbose=TRUE, method = "PCA")
+
+
+plot_pc_variance_explained(cds)
+
+
+```
+
+# Dimensionality Reduction
+```{r}
+cds <- reduce_dimension(cds,max_components=2,cores=6,verbose=TRUE, preprocess_method = "PCA")
+
+# pdf(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/cells_by_sample.pdf", width = 6,height = 6)
+plot_cells(cds)
+plot_cells(cds,color_cells_by="sample",cell_size=0.5,label_cell_groups = F)
+# 
+#plot_cells(cds,genes=c("Sox10","Ret","Uchl1","Snap25"),cell_size=0.8)
+# dev.off()
+
+
+```
+
+# Add additional metadata
+```{r}
+pData(cds)$age<-"P10"
+pData(cds)$age[grepl("^p2",pData(cds)$sample)]<-"P20"
+pData(cds)$age[grepl("^p6",pData(cds)$sample)]<-"P60"
+
+pData(cds)$batch <- "0"
+pData(cds)$batch[pData(cds)$sample %in% c("p11","p21","p61")] <- "1"
+
+pData(cds)$log10UMI <- log10(pData(cds)$Total_UMIs)
+```
+
+# Remove batch effect
+```{r}
+cds <- align_cds(cds, num_dim = 50, alignment_group = "batch",alignment_k = 20,verbose=T)
+cds <- reduce_dimension(cds,max_components=2,cores=4,verbose=TRUE)
+
+
+#pdf(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/cells_by_sample_batch_corrected.pdf", width =6, height = 6)
+plot_cells(cds,color_cells_by="sample", label_cell_groups = F, alpha = .5, cell_size = 0.5)
+plot_cells(cds, genes = c("Ret","Sox10"), alpha = 0.5)
+plot_cells(cds, genes = c("Msln","Fmo2"), alpha = 0.5)
+#dev.off()
+
+#pdf("/home/jared/ENS/Timecourse_ENS/plots/pilot_gene_survey.pdf",width=20,height=20)
+plot_cells(cds, genes=c("Met", "Cdh3", "Clic3", "Cftr", "Myh6", "Calcb"),cell_size=0.5)
+plot_cells(cds, genes=c("Ret", "Sox10", "Nos1", "Snap25", "Gfra1", "Gfra2"),cell_size=0.5)
+plot_cells(cds, genes=c("Slpi", "Wt1", "Msln", "Uchl1", "Chat", "Gpr88", "Best1", "Krt19", "Gfap", "Nes"),cell_size=0.5)
+dev.off()
+
+```
+
+# Clustering 
+```{r}
+cds <- cluster_cells(cds, k=20, cluster_method="leiden",num_iter=5, reduction_method="UMAP", partition_qval=0.05,verbose=TRUE,resolution=1e-05)
+
+#pdf("/home/jared/ENS/Timecourse_ENS/plots/UMAP_by_sample.pdf",width=12,height=6)
+plot_cells_mod(cds, color_cells_by="sample", group_cells_by="cluster", label_cell_groups = F) +
+  ggtitle("Sample") + facet_wrap(vars(sample))
+plot_cells_mod(cds, color_cells_by="age", group_cells_by="cluster", label_cell_groups = F) +
+  ggtitle("Age") + facet_wrap(vars(age))
+plot_cells_mod(cds, color_cells_by="batch", group_cells_by="cluster", label_cell_groups = F) +
+  ggtitle("Batch") + facet_wrap(vars(batch))
+#dev.off()
+
+# Clusters by age
+pData(cds)$partition<-partitions(cds)
+pData(cds)$clusters<-clusters(cds)
+
+p<-ggplot(as.data.frame(pData(cds))) +
+  geom_bar(aes(x=clusters,fill=sample),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("sample representation by cluster")
+p1<-ggplot(as.data.frame(pData(cds))) +
+  geom_bar(aes(x=clusters,fill=batch),position="fill") + scale_color_brewer() + monocle3:::monocle_theme_opts() + ggtitle("batch representation by cluster")
+
+#pdf("~/Goff_Lab/Kulkarni_ENS/6month_LMMP/plots/Cluster_by_sample.pdf",width=9,height=6)
+plot_cells(cds) 
+#plot_cells(cds, color_cells_by = "sample", label_cell_groups = F) + scale_color_brewer()
+plot_cells(cds, color_cells_by = "log10UMI") 
+p
+p1
+#dev.off()
+
+if(print.results) saveRDS(cds, "/home/jared/ENS/Timecourse_ENS/TC_LMMP_emptydrops.rds")
+```
+
+# Marker Gene testing
+```{r, eval =F}
+marker_test_res <- top_markers(cds, group_cells_by="cluster", cores=8,verbose=T)
+
+#write.table(x = marker_test_res,file = "~/Goff_Lab/Kulkarni_ENS/Analysis/partition_markers.tsv",sep = "\t",quote = F, col.names = T)
+#marker_test_res <- read.delim(file = "~/Goff_Lab/Kulkarni_ENS/Analysis/partition_markers.tsv", sep = "\t", header = T)
+
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(2, pseudo_R2)
+
+top_specific_marker_ids <- unique(top_specific_markers %>% pull(gene_id))
+
+
+
+#pdf("~/Goff_Lab/Kulkarni_ENS/Analysis/Plots/Rerun/50PCs/partition_marker_gene.pdf",width=8,height=8)
+plot_genes_by_group(cds,
+                    top_specific_marker_ids,
+                    group_cells_by="partition",
+                    ordering_type="maximal_on_diag",
+                    max.size=3)
+#dev.off()
+
+
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(25, pseudo_R2)
+
+dt <- DT::datatable(top_specific_markers)
+
+if(print.results) htmlwidgets::saveWidget(dt, 
+                                          file = "/home/jared/ENS/Timecourse_ENS/results/LMMP_cluster_markers.html")
+
+
+annot <- pData(cds)[,c("cluster", "cell_type")] %>% unique %>% as.data.frame()
+colnames(annot)[1] <- "cell_group"
+markers <- inner_join(marker_test_res, annot, by = "cell_group")
+write.csv(markers, "/data/users/jared/ENS/Timecourse_ENS/results/lmmp_cluster_markers.csv")
+
+```
+#Cell type annotations
+```{r annotate, eval = F}
+pData(cds)$cell_type <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 1] <- "smooth muscle or junk"
+pData(cds)$cell_type[pData(cds)$clusters %in% 2] <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 3] <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 4] <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 5] <- "fibroblast 1"
+pData(cds)$cell_type[pData(cds)$clusters %in% 6] <- "Neuroglia"
+pData(cds)$cell_type[pData(cds)$clusters %in% 7] <- "unknown" #cardiac mesoderm character
+#Cacna1c, ppp1r12a
+pData(cds)$cell_type[pData(cds)$clusters %in% 8] <- "smooth muscle"
+pData(cds)$cell_type[pData(cds)$clusters %in% 9] <- "MENs"
+pData(cds)$cell_type[pData(cds)$clusters %in% 10] <- "unknown" #enterocytes keep popping up, lysosomes
+pData(cds)$cell_type[pData(cds)$clusters %in% 11] <- "NENs"
+pData(cds)$cell_type[pData(cds)$clusters %in% 12] <- "Unknown" #endothelial or fibroblasts
+pData(cds)$cell_type[pData(cds)$clusters %in% 13] <- "endothelial"
+pData(cds)$cell_type[pData(cds)$clusters %in% 14] <- "ICC?"
+pData(cds)$cell_type[pData(cds)$clusters %in% 15] <- "macrophage"
+pData(cds)$cell_type[pData(cds)$clusters %in% 16] <- "enterocytes" #lots of slc, muc3m anpep
+pData(cds)$cell_type[pData(cds)$clusters %in% 17] <- "unknown" #fibroblasts, endothelial cells
+pData(cds)$cell_type[pData(cds)$clusters %in% 18] <- "RBC"
+pData(cds)$cell_type[pData(cds)$clusters %in% 19] <- "fibroblasts" #collagens, lots of hemato/osteo-growth factors
+pData(cds)$cell_type[pData(cds)$clusters %in% 20] <- "smooth muscle"
+pData(cds)$cell_type[pData(cds)$clusters %in% 21] <- "unknown" #macrophage/fibroblasts/smooth muscle
+pData(cds)$cell_type[pData(cds)$clusters %in% 22] <- "T cells"
+pData(cds)$cell_type[pData(cds)$clusters %in% 23] <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 24] <- "B cells"
+pData(cds)$cell_type[pData(cds)$clusters %in% 25] <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 26] <- "mucosal epithelium"
+pData(cds)$cell_type[pData(cds)$clusters %in% 27] <- "unknown"
+pData(cds)$cell_type[pData(cds)$clusters %in% 28] <- "neuroglia/neuroendeocrine?" #neuroendocrine?
+pData(cds)$cell_type[pData(cds)$clusters %in% 29] <- "fibroblast 2"
+pData(cds)$cell_type[pData(cds)$clusters %in% 30] <- "putative glia"
+pData(cds)$cell_type[pData(cds)$clusters %in% 31] <- "S/G2M"
+pData(cds)$cell_type[pData(cds)$clusters %in% 32] <- "adipocytes"
+
+```
+
+
+# QC plots
+```{r}
+p<-ggplot(as.data.frame(pData(cds))) 
+
+#p1<-p + geom_violin(aes(x=partition,y=log10(Total_UMIs),fill=partition)) + monocle3:::monocle_theme_opts() + ggtitle("Total UMIs by partition")+ guides(fill=FALSE)
+p1<-p + geom_violin(aes(x=sample,y=log10(Total_UMIs),fill=sample)) + monocle3:::monocle_theme_opts() + ggtitle("Total UMIs by sample")+ guides(fill=FALSE)
+
+#p2<-p + geom_violin(aes(x=partition,y=log10(num_genes_expressed),fill=partition)) + monocle3:::monocle_theme_opts() + ggtitle("Num Genes Expressed by partition") + guides(fill=FALSE)
+p2<-p + geom_violin(aes(x=sample,y=log10(num_genes_expressed),fill=sample)) + monocle3:::monocle_theme_opts() + ggtitle("Num Genes Expressed by sample") + guides(fill=FALSE)
+
+
+
+p3 <- p +
+       geom_violin(aes(x =clusters, y = mito_ratio, fill = clusters)) +
+       labs(x = "Assigned cluster", y = "Mitochondrial ratio") +
+       scale_color_brewer(palette = "Set1") +
+       theme(legend.position = "none") +
+       ggtitle("Cluster vs Mitochondrial ratio") +
+       monocle3:::monocle_theme_opts() +
+       geom_hline(yintercept = final_mt_threshold, color = "black", linetype = "dashed") +
+       annotate("text", label = paste0(final_mt_threshold*100, " % mt"), x = 14, y = final_mt_threshold+0.01, size = 3, colour = "black")
+
+p4 <- p +
+      geom_violin(aes(x=clusters, y=log10(Total_UMIs), fill = clusters)) +
+      labs(x= "cluster", y ="log10 UMI count") +
+      scale_color_brewer(palette = "Set1") +
+      theme(legend.position = "none") +
+      ggtitle("cluster vs UMI count") +
+      monocle3:::monocle_theme_opts() +
+      geom_hline(yintercept = log10(final_UMI_threshold), color = "black", linetype = "dashed") +
+      annotate("text", label = paste0(final_UMI_threshold, " UMI"), x = 14, y = log10(final_UMI_threshold)-0.2, size = 3, colour = "black")
+      
+
+p5 <- p +
+      geom_violin(aes(x=clusters, y=log10(num_genes_expressed), fill = clusters)) +
+      labs(x= "cluster", y ="log10 genes expressed") +
+      scale_color_brewer(palette = "Set1") +
+      theme(legend.position = "none") +
+      ggtitle("cluster vs genes expressed") +
+      monocle3:::monocle_theme_opts()
+
+#pdf("~/Goff_Lab/Kulkarni_ENS/6month_LMMP/plots/qc_by_sample.pdf",width=10,height=5)
+p1
+p2
+p3
+p4
+p5
+#dev.off()
+```
+
+```{r, eval = T}
+
+mm.pairs <- readRDS(system.file("exdata", "mouse_cycle_markers.rds", package="scran"))
+
+exprs.mat <- exprs(cds)
+rownames(exprs.mat) <- fData(cds)$gene_id_trimmed
+cyc_results <- cyclone(exprs.mat, pairs = mm.pairs, verbose = T)
+
+pData(cds)$cycle_phase <- cyc_results[['phases']]
+
+pData(cds)$cycle_G1_score <- cyc_results[['normalized.scores']]$G1
+pData(cds)$cycle_S_score <- cyc_results[['normalized.scores']]$S
+pData(cds)$cycle_G2M_score <- cyc_results[['normalized.scores']]$G2M
+
+```
+
+```{r}
+mens_genes <- c("S100a6","Crip1","Muc16","Slpi","Upk1b","Upk3b","Igfbp6","Msln","C3","Fmo2","Aebp1")
+
+
+#https://matthieuxmoreau.github.io/EarlyPallialNeurogenesis/html-Reports/Figure2.html
+#Prepare_data_for_scrattchhicat
+cds_sub <- cds[fData(cds)$gene_short_name %in% mens_genes,pData(cds)$cell_type %in% c("NENs","MENs","neuroglia/neuroendeocrine?","Neuroglia")]
+
+colors <-  c("#ebcb2e", "#9ec22f", "#a9961b", "#cc3a1b")
+# , "#cc8778" , "#d14c8d", "#4cabdc", "#5ab793", "#e7823a","#e6bb9b", "#046c9a")
+colorsident <- cbind(ident = unique(as.character(pData(cds_sub)$cell_type)),
+                     colors = colors,
+                     id = unique(pData(cds_sub)$cell_type))
+
+# Create annotation data.frame
+anno.df <- as.data.frame(cbind(
+  sample_name = colnames(cds_sub),
+  primary_type_id = colorsident[match(as.character(pData(cds_sub)$cell_type), colorsident[,1]),3],
+  primary_type_label = as.character(pData(cds_sub)$cell_type),
+  primary_type_color = colorsident[match(as.character(pData(cds_sub)$cell_type), colorsident[,1]),2]
+))
+
+
+gene_name_df <- fData(cds_sub)[,"gene_short_name", drop = F] %>%
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "gene_id")
+
+#cells as rows, genes as columns per documentation
+exprs_mat <- normalized_counts(cds_sub, norm_method = "log") %>%
+  as.matrix() %>% 
+  as.data.frame() %>%
+  tibble::rownames_to_column(var = "gene_id") %>%
+  inner_join(gene_name_df, by = "gene_id") %>%
+  tibble::column_to_rownames(var = "gene_short_name") %>%
+  dplyr::select(-gene_id) %>%
+  t() %>% as.data.frame %>%
+  tibble::rownames_to_column(var= "sample_name")
+
+exprs_bar_plot <- scrattch.vis::sample_bar_plot(exprs_mat, anno.df, genes = mens_genes, 
+                              grouping = "primary_type",
+                              bg_color ="#f7f7f7", font_size = 12)
+
+mens_cells <-pData(cds) %>% as.data.frame() %>% filter("cell_type" == "MENs") %>% rownames()
+
+if(!(dir.exists("/home/jared/ENS/Timecourse_ENS/mens"))){dir.create("/home/jared/ENS/Timecourse_ENS/mens")}
+write.csv(mens_cells, "/home/jared/ENS/Timecourse_ENS/mens/", quote = F, row.names = T)
+```
+
+
+
+# Session Information
+```{r session}
+saveRDS(cds, "/home/jared/ENS/Timecourse_ENS/TC_LMMP_reproduced.rds")
+sessionInfo()
+```
+

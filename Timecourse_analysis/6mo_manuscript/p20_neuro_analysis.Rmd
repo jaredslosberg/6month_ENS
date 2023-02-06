@@ -1,0 +1,45 @@
+---
+title: "p20_neuro_analysis"
+author: "Jared Slosberg"
+date: "5/20/2022"
+output: 
+  html_document: 
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(monocle3)
+library(tidyverse)
+
+source(here("scripts/accessory_functions/monocle_mods.R"))
+source(here("scripts/accessory_functions/pattern_plotting.R"))
+
+```
+
+
+```{r}
+cds <- readRDS(here("tc_neuro_p20.rds"))
+```
+
+```{r}
+cds <- preprocess_cds(cds, num_dim = 8)
+# cds <- align_cds(cds, alignment_group = "batch")
+cds <- reduce_dimension(cds, preprocess_method = "PCA")
+
+```
+
+```{r}
+plot_cells(cds, color_cells_by = "cell_type_aggregate")
+```
+```{r}
+plot_cells(cds, color_cells_by = "cell_type_aggregate")
+```
+```{r}
+saveRDS(cds, here("tc_neuro_p20.rds"))
+```
+

@@ -1,0 +1,158 @@
+---
+title: "6month projections"
+author: "Jared Slosberg"
+date: "5/19/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r check_interactive}
+
+if(interactive()){
+  print(date())
+  print("This was run interactively. Please run with rmarkdown::render")
+}else{
+  print(paste0("This notebook was compiled on ", date()))
+}
+```
+
+
+```{r load, message = FALSE, results= 'hide', warning=FALSE, include = F}
+library(projectR)
+library(ggplot2)
+library(dplyr)
+library(monocle3)
+library(here)
+library(furrr)
+library(purrr)
+source(here("scripts/accessory_functions/monocle_mods.R"))
+source(here("scripts/accessory_functions/pattern_plotting.R"))
+source(here("scripts/accessory_functions/patternFeatureCorrelationHeatmap.R"))
+
+
+```
+
+
+```{r init}
+
+# none, cell_size_log, log
+norm_method <- "cell_size_log"
+
+#declare patterns of interest
+MENS_patterns <- c(16,27,32,41)
+select_patterns <- c(MENS_patterns)
+
+
+print(norm_method)
+
+print(select_patterns)
+
+###Load in projections ----
+#teichman_gut_atlas_filename <- 
+lmmp_filename <- here("TC_LMMP.rds")
+
+lmmp <- readRDS(lmmp_filename)
+
+#Previously learned gene weights from NMF on logscaled expression counts
+lmmp_6mo_patttern_geneweights_filename <- here("results/6month_projection_weights/pattern_gene_weights.csv")
+learned_weights <- read.csv(
+  file = lmmp_6mo_patttern_geneweights_filename,
+  row.names = 1)
+
+npattern <- dim(learned_weights)[2]
+
+```
+
+Prep expresion matrix Find genes shared between datasets
+```{r}
+
+head(rownames(learned_weights))
+
+#size normalized, log10 transformed
+assay(lmmp, "logcounts") <- normalized_counts(lmmp)
+
+exprs_mat <- assay(lmmp, "logcounts")
+rownames(exprs_mat) <- fData(lmmp)$gene_short_name
+
+#Now both are human genes, take intersection
+genes_to_use <- intersect(rownames(learned_weights), rownames(exprs_mat))
+
+lmmp_filt <- lmmp[fData(lmmp)$gene_short_name %in% genes_to_use,]
+learned_weights_filt <- learned_weights[genes_to_use,]
+```
+
+
+
+```{r} 
+load.existing.projection.values <- 0
+if(load.existing.projection.values){
+  #first column is cell barcodes, rest of columns are patterns
+  transferred_cell_weights <- read.csv(here(""),
+                       row.names = 1)
+}else{
+  set.seed(131)
+  
+
+  
+  #projection
+  transferred_cell_weights <- t(projectR::projectR(data = as.matrix(exprs_mat),
+                                                 loadings = as.matrix(learned_weights_filt)))
+    
+  colnames(transferred_cell_weights) = paste0("6mo_cellPattern",1:npattern)
+    
+}
+
+write.csv(transferred_cell_weights,paste0(here("results/6month_projection_weights/tc_in_6mo_LMMP_old_patterns.csv")),quote = F, row.names = T)
+
+
+```
+
+```{r}
+
+#Bind pattern weights to object, make sure cells are exactly the same. Could left_merge but pData not being a true data.frame is an issue
+assertthat::assert_that(all(rownames(pData(lmmp)) == rownames(transferred_cell_weights)),
+                        msg = "Cells in projection weights matrix are not the same as cells in cds object")
+pData(lmmp) <- cbind(pData(lmmp), transferred_cell_weights)
+
+pattern_wt_plots_select <- lapply(select_patterns, plotCellPatterns, cds_obj = lmmp, do.clip = c(0.01,0.99), pattern_prefix = "6mo_cellPattern")
+pattern_wt_plots_select
+
+pattern_wt_plots <- lapply( 1:npattern, plotCellPatterns, cds_obj = lmmp, do.clip = c(0.01,0.99), pattern_prefix = "6mo_cellPattern")
+pattern_wt_plots[1:5]
+```
+
+```{r, eval = F}
+#calculate UMAP based on projected pattern weights instead of PCA
+do.reembed <- 1
+if (do.reembed){
+  features_of_interest <- transferred_cell_weights[,paste0("6mo_cellPattern",select_patterns)]
+  umap_res <- uwot::umap(as.matrix(features_of_interest),
+                         metric="cosine",
+                         min_dist = 0.1,
+                         nn_method = "annoy")
+  
+  reducedDims(lmmp)$NMF_UMAP <- umap_res
+  
+  plot_cells_mod(lmmp, reduction_method = "NMF_UMAP", color_cells_by = "cell_type", label_cell_groups = F) + 
+    ggtitle(paste0("UMAP embedding based on projections of select ENS patterns: ", 
+                   paste(select_patterns, collapse = ",")))
+  
+  p_wt_plots <-lapply(select_patterns, plotCellPatterns, lmmp, red_method = "NMF_UMAP", do.clip = c(0.01,0.99), pattern_prefix = "6mo_cellPattern")
+  
+}      
+
+pData(lmmp)$is_mens <- pData(lmmp)$cell_type == "MENs"
+
+  
+  plot_cells_mod(lmmp, reduction_method = "NMF_UMAP", color_cells_by = "is_mens", label_cell_groups = F) + 
+    ggtitle(paste0("UMAP embedding based on projections of select ENS patterns: ", 
+                   paste(select_patterns, collapse = ",")))
+
+```
+
+
+
