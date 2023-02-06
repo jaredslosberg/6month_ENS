@@ -30,8 +30,7 @@ MES_6mo_LMMP_analysis.Rmd
   
   
 ## Analysis of relevant public datasets
-tabula_muris/ teichman_gut_atlas/ vanderbilt/
-Preprocessing of each datasets elsewhere, e.g. /data/users/jared/atlas_processing
+External datasets were downloaded from GEO
 
 
 ## RNA Velocity analysis
