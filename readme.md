@@ -1,10 +1,13 @@
+Data analysis repository for Kulkarni et al, [Age-associated changes in lineage composition of the enteric nervous system regulate gut health and disease][https://doi.org/10.7554/eLife.88051.1]
+
+BioRxiv version of our [manuscript][https://www.biorxiv.org/content/10.1101/2020.08.25.262832v1.full]
+
  # Analysis of 6month LMMP scRNA
 
-Raw FASTQs, count matrices, and metadata are available at GSE156146
-Current version of our [manuscript][https://www.biorxiv.org/content/10.1101/2020.08.25.262832v1.full]
+Raw FASTQs, count matrices, and metadata are available at GSE156146. Cell metadata available in cell_clusters_and_metadata.csv
 
 Library generated with 10xv2 chemistry
-Tissue prepped by longitudinal muscle myenteric plexus (LMMP) from two 6month animals (TH, TL)
+Tissue prepped from longitudinal muscle myenteric plexus (LMMP) from two 6 month mice
  
 ## Preprocessing to generate counts with kallisto bustools
 Scripts in ./preprocessing/
@@ -20,22 +23,11 @@ get_velo_files_mm10_10xv2.R
 ## Processing from raw UMI counts, QC, dimensionality reduction
 ./scripts ./data ./results ./plots hold the relevant info
 Modular functions held in ./scripts/accessory_functions
-Scripts to generate figs and supp figs in ./scripts/figures
 
-Scripts run in the following order: 
-MES_6mo_LMMP_analysis.Rmd
-  tricycle_analysis.Rmd
-    pattern_analysis.R
-  6mo_MENS_followup.Rmd
-  
-  
-## Analysis of relevant public datasets
-External datasets were downloaded from GEO
+Scripts to generate figures and supplemental figures are available in ./scripts/figures
+
+## Analysis of public datasets
+Elmentaite et al: Spliced and unspliced count matrices for mesenchymal subset of the Gut Cell Atlas were obtained from https://www.gutcellatlas.org/
+May-Zhang et al: Adult ileal snRNAseq counts matrices et al were obtained from GEO GSE153192
 
 
-## RNA Velocity analysis
-Spliced and unspliced counts generated using kallisto during preprocessing
-After generation and annotation of cds object, calculate RNA velocity
-
-velocity/scripts/make_h5ad.R #converts cds object to h5ad and adds unspliced counts
-  velocity/velocity.ipynb
