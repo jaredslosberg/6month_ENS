@@ -1,6 +1,6 @@
-Data analysis repository for Kulkarni et al, [Age-associated changes in lineage composition of the enteric nervous system regulate gut health and disease][https://doi.org/10.7554/eLife.88051.1]
+Data analysis repository for Kulkarni et al, [Age-associated changes in lineage composition of the enteric nervous system regulate gut health and disease](https://doi.org/10.7554/eLife.88051.1)
 
-BioRxiv version of our [manuscript][https://www.biorxiv.org/content/10.1101/2020.08.25.262832v1.full]
+BioRxiv version of our [manuscript](https://www.biorxiv.org/content/10.1101/2020.08.25.262832v1.full)
 
  # Analysis of 6month LMMP scRNA
 
